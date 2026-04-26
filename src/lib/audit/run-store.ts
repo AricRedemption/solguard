@@ -1,6 +1,14 @@
 import type { AuditRunSnapshot } from "@/types/audit";
 
 const RUN_KEY_PREFIX = "solguard-audit-run:";
+const RUN_STORE_EVENT = "solguard:audit-run-snapshot";
+const runSnapshotCache = new Map<
+  string,
+  {
+    raw: string;
+    snapshot: AuditRunSnapshot;
+  }
+>();
 
 function safeStorageAvailable(): boolean {
   return typeof window !== "undefined" && Boolean(window.localStorage);
@@ -45,10 +53,50 @@ export function createAuditRunStorageSnapshot(record: AuditRunSnapshot): AuditRu
 
 export function saveAuditRunSnapshot(record: AuditRunSnapshot): boolean {
   const snapshot = createAuditRunStorageSnapshot(record);
-  return writeJSON(RUN_KEY_PREFIX + snapshot.id, snapshot);
+  const key = RUN_KEY_PREFIX + snapshot.id;
+  const raw = JSON.stringify(snapshot);
+
+  if (!writeJSON(key, snapshot)) {
+    return false;
+  }
+
+  runSnapshotCache.set(key, {
+    raw,
+    snapshot,
+  });
+
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event(RUN_STORE_EVENT));
+  }
+
+  return true;
 }
 
 export function loadAuditRunSnapshot(runId: string): AuditRunSnapshot | null {
   if (!runId) return null;
-  return readJSON<AuditRunSnapshot | null>(RUN_KEY_PREFIX + runId, null);
+
+  const key = RUN_KEY_PREFIX + runId;
+  if (!safeStorageAvailable()) {
+    return null;
+  }
+
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) {
+      runSnapshotCache.delete(key);
+      return null;
+    }
+
+    const cached = runSnapshotCache.get(key);
+    if (cached && cached.raw === raw) {
+      return cached.snapshot;
+    }
+
+    const snapshot = JSON.parse(raw) as AuditRunSnapshot;
+    runSnapshotCache.set(key, { raw, snapshot });
+    return snapshot;
+  } catch (error) {
+    console.error("[audit/run-store] Failed to read storage", error);
+    return readJSON<AuditRunSnapshot | null>(key, null);
+  }
 }

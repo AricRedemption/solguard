@@ -10,8 +10,18 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useTranslation } from "@/lib/i18n";
-import { loadAuditReport } from "@/lib/audit/report-store";
 import { loadAuditRunSnapshot } from "@/lib/audit/run-store";
+import type { AuditReportRecord } from "@/types/audit";
+
+const REPORT_KEY_PREFIX = "solguard-audit-report:";
+const RUN_STORE_EVENT = "solguard:audit-run-snapshot";
+const reportSnapshotCache = new Map<
+  string,
+  {
+    raw: string;
+    report: AuditReportRecord | null;
+  }
+>();
 
 function formatTimestamp(value: string) {
   try {
@@ -27,11 +37,7 @@ function formatTimestamp(value: string) {
 function useStoredRunSnapshot(runId: string | undefined) {
   return useSyncExternalStore(
     (onStoreChange) => {
-      if (!runId) {
-        return () => {};
-      }
-
-      if (typeof window === "undefined") {
+      if (!runId || typeof window === "undefined") {
         return () => {};
       }
 
@@ -45,8 +51,16 @@ function useStoredRunSnapshot(runId: string | undefined) {
         }
       };
 
+      const handleCustomEvent = () => {
+        onStoreChange();
+      };
+
       window.addEventListener("storage", handleStorage);
-      return () => window.removeEventListener("storage", handleStorage);
+      window.addEventListener(RUN_STORE_EVENT, handleCustomEvent);
+      return () => {
+        window.removeEventListener("storage", handleStorage);
+        window.removeEventListener(RUN_STORE_EVENT, handleCustomEvent);
+      };
     },
     () => (runId ? loadAuditRunSnapshot(runId) : null),
     () => null
@@ -56,19 +70,15 @@ function useStoredRunSnapshot(runId: string | undefined) {
 function useStoredAuditReport(reportId: string | null | undefined) {
   return useSyncExternalStore(
     (onStoreChange) => {
-      if (!reportId) {
-        return () => {};
-      }
-
-      if (typeof window === "undefined") {
+      if (!reportId || typeof window === "undefined") {
         return () => {};
       }
 
       const handleStorage = (event: StorageEvent) => {
         if (
           !event.key ||
-          event.key === `solguard-audit-report:${reportId}` ||
-          event.key.startsWith("solguard-audit-report:")
+          event.key === `${REPORT_KEY_PREFIX}${reportId}` ||
+          event.key.startsWith(REPORT_KEY_PREFIX)
         ) {
           onStoreChange();
         }
@@ -77,7 +87,32 @@ function useStoredAuditReport(reportId: string | null | undefined) {
       window.addEventListener("storage", handleStorage);
       return () => window.removeEventListener("storage", handleStorage);
     },
-    () => (reportId ? loadAuditReport(reportId) : null),
+    () => {
+      if (!reportId || typeof window === "undefined") {
+        return null;
+      }
+
+      const key = `${REPORT_KEY_PREFIX}${reportId}`;
+      try {
+        const raw = window.localStorage.getItem(key);
+        if (!raw) {
+          reportSnapshotCache.delete(key);
+          return null;
+        }
+
+        const cached = reportSnapshotCache.get(key);
+        if (cached && cached.raw === raw) {
+          return cached.report;
+        }
+
+        const report = JSON.parse(raw) as AuditReportRecord;
+        reportSnapshotCache.set(key, { raw, report });
+        return report;
+      } catch (error) {
+        console.error("[audit/report-store] Failed to read storage", error);
+        return null;
+      }
+    },
     () => null
   );
 }
@@ -105,7 +140,8 @@ export default function AuditRunPage() {
   }, [liveSnapshot, runId, storedSnapshot]);
 
   const report = useStoredAuditReport(snapshot?.resultId);
-  const result = state.status === "results" ? state.data : report?.result;
+  const storedReport = report?.id === snapshot?.resultId ? report : null;
+  const result = state.status === "results" ? state.data : storedReport?.result;
   const analysisContext = result?.analysisContext;
   const isActiveRun = state.status === "loading" && snapshot?.id === runId;
   const isCompletedRun = Boolean(result || snapshot?.resultId);

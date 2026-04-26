@@ -64,6 +64,10 @@ export function AuditSessionProvider({ children }: { children: ReactNode }) {
   const latestRunSnapshot = useLatestRunSnapshot();
   const inputContextRef = useRef<AuditRunInputContext | null>(null);
   const savedReportIdRef = useRef<string | null>(null);
+  const liveRunSnapshot =
+    audit.state.status === "loading" || audit.state.status === "results"
+      ? audit.state.runSnapshot ?? null
+      : null;
 
   const startAudit = useCallback(
     (files: SourceFile[], llmConfig: LLMConfig, githubUrls: string[] = []) => {
@@ -97,19 +101,14 @@ export function AuditSessionProvider({ children }: { children: ReactNode }) {
   }, [audit]);
 
   useEffect(() => {
-    const runSnapshot =
-      audit.state.status === "loading" || audit.state.status === "results"
-        ? audit.state.runSnapshot ?? null
-        : null;
-
-    if (!runSnapshot) {
+    if (!liveRunSnapshot) {
       return;
     }
 
-    const snapshot = createAuditRunStorageSnapshot(runSnapshot);
+    const snapshot = createAuditRunStorageSnapshot(liveRunSnapshot);
     setLatestRunSnapshot(snapshot);
     saveAuditRunSnapshot(snapshot);
-  }, [audit.state]);
+  }, [liveRunSnapshot]);
 
   useEffect(() => {
     if (audit.state.status !== "results") {

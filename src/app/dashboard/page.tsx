@@ -130,7 +130,7 @@ export default function DashboardPage() {
     },
   ];
 
-  const isLaunching = state.status === "loading" && !latestRunSnapshot?.id;
+  const isActiveRun = state.status === "loading";
   const isRedirecting = state.status === "loading" && Boolean(latestRunSnapshot?.id);
   const showNewAudit = Boolean(latestRunSnapshot?.id || state.status === "loading" || state.status === "results");
 
@@ -183,80 +183,84 @@ export default function DashboardPage() {
 
           <Card className="border-dark-600/50 bg-dark-700/50 backdrop-blur-sm">
             <CardContent className="space-y-5 pt-6">
-              <FileUploadZone
-                activeMode={sourceMode}
-                onModeChange={setSourceMode}
-                onAppendFiles={(newFiles) => setFiles((prev) => [...prev, ...newFiles])}
-                onRemoveFile={(index) => setFiles((prev) => prev.filter((_, i) => i !== index))}
-                files={files}
-                githubDraft={githubDraft}
-                onGithubDraftChange={setGithubDraft}
-              />
+              {isActiveRun ? (
+                <>
+                  <RunLaunchCard
+                    stage={state.stage}
+                    progress={state.progress}
+                    onCancel={cancelAudit}
+                    cancelLabel={t.dashboard.cancel}
+                  />
 
-              {!isConfigured ? (
-                <div className="rounded-lg border border-orange-500/30 bg-orange-500/10 p-4">
-                  <div className="flex items-start gap-3">
-                    <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-orange-500" />
-                    <div>
-                      <p className="text-sm font-medium text-orange-400">
-                        {t.dashboard.llmNotConfigured}
-                      </p>
-                      <p className="mt-1 text-xs text-slate-400">
-                        {t.dashboard.llmNotConfiguredDesc}
-                      </p>
+                  {isRedirecting ? (
+                    <div className="rounded-lg border border-dark-600/60 bg-dark-900/40 p-4 text-sm text-slate-300">
+                      Opening the dedicated run page...
                     </div>
-                  </div>
-                </div>
-              ) : null}
+                  ) : null}
+                </>
+              ) : (
+                <>
+                  <FileUploadZone
+                    activeMode={sourceMode}
+                    onModeChange={setSourceMode}
+                    onAppendFiles={(newFiles) => setFiles((prev) => [...prev, ...newFiles])}
+                    onRemoveFile={(index) => setFiles((prev) => prev.filter((_, i) => i !== index))}
+                    files={files}
+                    githubDraft={githubDraft}
+                    onGithubDraftChange={setGithubDraft}
+                  />
 
-              {isLaunching ? (
-                <RunLaunchCard
-                  stage={state.stage}
-                  progress={state.progress}
-                  onCancel={cancelAudit}
-                  cancelLabel={t.dashboard.cancel}
-                />
-              ) : null}
+                  {!isConfigured ? (
+                    <div className="rounded-lg border border-orange-500/30 bg-orange-500/10 p-4">
+                      <div className="flex items-start gap-3">
+                        <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-orange-500" />
+                        <div>
+                          <p className="text-sm font-medium text-orange-400">
+                            {t.dashboard.llmNotConfigured}
+                          </p>
+                          <p className="mt-1 text-xs text-slate-400">
+                            {t.dashboard.llmNotConfiguredDesc}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
 
-              {isRedirecting ? (
-                <div className="rounded-lg border border-dark-600/60 bg-dark-900/40 p-4 text-sm text-slate-300">
-                  Opening the dedicated run page...
-                </div>
-              ) : null}
+                  {state.status === "error" ? (
+                    <div className="rounded-lg border border-critical/30 bg-critical/10 p-4">
+                      <p className="text-sm text-critical">{state.message}</p>
+                    </div>
+                  ) : null}
 
-              {state.status === "error" ? (
-                <div className="rounded-lg border border-critical/30 bg-critical/10 p-4">
-                  <p className="text-sm text-critical">{state.message}</p>
-                </div>
-              ) : null}
-
-              {!isLaunching && !isRedirecting ? (
-                <Button
-                  className="w-full bg-gradient-to-r from-solana-purple to-solana-blue text-white hover:shadow-lg hover:shadow-solana-purple/25"
-                  onClick={handleStartAudit}
-                  disabled={!canStart}
-                >
-                  <Zap className="mr-2 h-4 w-4" />
-                  {t.dashboard.startAudit}
-                </Button>
-              ) : null}
+                  <Button
+                    className="w-full bg-gradient-to-r from-solana-purple to-solana-blue text-white hover:shadow-lg hover:shadow-solana-purple/25"
+                    onClick={handleStartAudit}
+                    disabled={!canStart}
+                  >
+                    <Zap className="mr-2 h-4 w-4" />
+                    {t.dashboard.startAudit}
+                  </Button>
+                </>
+              )}
             </CardContent>
           </Card>
 
-          <div className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {dashboardFeatures.map((feature) => (
-              <Card
-                key={feature.title}
-                className="border-dark-600/50 bg-dark-700/30 transition-all hover:border-solana-purple/30"
-              >
-                <CardContent className="pt-4">
-                  <feature.icon className="mb-2 h-5 w-5 text-solana-purple" />
-                  <h3 className="text-sm font-semibold text-white">{feature.title}</h3>
-                  <p className="text-xs text-slate-500">{feature.desc}</p>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
+          {!isActiveRun ? (
+            <div className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              {dashboardFeatures.map((feature) => (
+                <Card
+                  key={feature.title}
+                  className="border-dark-600/50 bg-dark-700/30 transition-all hover:border-solana-purple/30"
+                >
+                  <CardContent className="pt-4">
+                    <feature.icon className="mb-2 h-5 w-5 text-solana-purple" />
+                    <h3 className="text-sm font-semibold text-white">{feature.title}</h3>
+                    <p className="text-xs text-slate-500">{feature.desc}</p>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          ) : null}
         </motion.div>
       </main>
     </div>
