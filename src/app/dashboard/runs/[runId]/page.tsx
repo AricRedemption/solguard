@@ -1,27 +1,30 @@
 "use client";
 
-import { useMemo, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useSyncExternalStore } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { ArrowLeft, ArrowUpRight, Clock3, Layers3, ShieldCheck } from "lucide-react";
-import { AnalysisSummaryPanel } from "@/components/dashboard/AnalysisSummaryPanel";
 import { AuditExecutionPanel } from "@/components/dashboard/AuditExecutionPanel";
 import { useAuditSession } from "@/components/dashboard/AuditSessionProvider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useTranslation } from "@/lib/i18n";
+import {
+  EVOLUTION_STORE_EVENT,
+  listEvolutionCandidates,
+} from "@/lib/audit/evolution-store";
 import { loadAuditRunSnapshot } from "@/lib/audit/run-store";
-import type { AuditReportRecord } from "@/types/audit";
 
-const REPORT_KEY_PREFIX = "solguard-audit-report:";
 const RUN_STORE_EVENT = "solguard:audit-run-snapshot";
-const reportSnapshotCache = new Map<
+const EVOLUTION_INDEX_KEY = "solguard-audit-evolution:index";
+const evolutionCandidatesCache = new Map<
   string,
   {
     raw: string;
-    report: AuditReportRecord | null;
+    records: ReturnType<typeof listEvolutionCandidates>;
   }
 >();
+const EMPTY_EVOLUTION_CANDIDATES: ReturnType<typeof listEvolutionCandidates> = [];
 
 function formatTimestamp(value: string) {
   try {
@@ -32,6 +35,19 @@ function formatTimestamp(value: string) {
   } catch {
     return value;
   }
+}
+
+function formatWorkflowKey(
+  workflow: string | null | undefined,
+  labels: Record<string, string>,
+  fallback: string
+) {
+  if (!workflow) {
+    return fallback;
+  }
+
+  const normalized = workflow.replace(/_/g, "-");
+  return labels[normalized] || labels[workflow] || workflow;
 }
 
 function useStoredRunSnapshot(runId: string | undefined) {
@@ -67,53 +83,60 @@ function useStoredRunSnapshot(runId: string | undefined) {
   );
 }
 
-function useStoredAuditReport(reportId: string | null | undefined) {
+function useStoredEvolutionCandidates() {
   return useSyncExternalStore(
     (onStoreChange) => {
-      if (!reportId || typeof window === "undefined") {
+      if (typeof window === "undefined") {
         return () => {};
       }
 
       const handleStorage = (event: StorageEvent) => {
         if (
           !event.key ||
-          event.key === `${REPORT_KEY_PREFIX}${reportId}` ||
-          event.key.startsWith(REPORT_KEY_PREFIX)
+          event.key === "solguard-audit-evolution:index" ||
+          event.key.startsWith("solguard-audit-evolution:")
         ) {
           onStoreChange();
         }
       };
 
+      const handleCustomEvent = () => {
+        onStoreChange();
+      };
+
       window.addEventListener("storage", handleStorage);
-      return () => window.removeEventListener("storage", handleStorage);
+      window.addEventListener(EVOLUTION_STORE_EVENT, handleCustomEvent);
+      return () => {
+        window.removeEventListener("storage", handleStorage);
+        window.removeEventListener(EVOLUTION_STORE_EVENT, handleCustomEvent);
+      };
     },
     () => {
-      if (!reportId || typeof window === "undefined") {
-        return null;
+      if (typeof window === "undefined") {
+        return EMPTY_EVOLUTION_CANDIDATES;
       }
 
-      const key = `${REPORT_KEY_PREFIX}${reportId}`;
       try {
-        const raw = window.localStorage.getItem(key);
+        const raw = window.localStorage.getItem(EVOLUTION_INDEX_KEY);
         if (!raw) {
-          reportSnapshotCache.delete(key);
-          return null;
+          evolutionCandidatesCache.delete(EVOLUTION_INDEX_KEY);
+          return EMPTY_EVOLUTION_CANDIDATES;
         }
 
-        const cached = reportSnapshotCache.get(key);
+        const cached = evolutionCandidatesCache.get(EVOLUTION_INDEX_KEY);
         if (cached && cached.raw === raw) {
-          return cached.report;
+          return cached.records;
         }
 
-        const report = JSON.parse(raw) as AuditReportRecord;
-        reportSnapshotCache.set(key, { raw, report });
-        return report;
+        const records = listEvolutionCandidates();
+        evolutionCandidatesCache.set(EVOLUTION_INDEX_KEY, { raw, records });
+        return records;
       } catch (error) {
-        console.error("[audit/report-store] Failed to read storage", error);
-        return null;
+        console.error("[audit/evolution-store] Failed to read storage", error);
+        return EMPTY_EVOLUTION_CANDIDATES;
       }
     },
-    () => null
+    () => EMPTY_EVOLUTION_CANDIDATES
   );
 }
 
@@ -139,12 +162,30 @@ export default function AuditRunPage() {
     return liveSnapshot ?? storedSnapshot;
   }, [liveSnapshot, runId, storedSnapshot]);
 
-  const report = useStoredAuditReport(snapshot?.resultId);
-  const storedReport = report?.id === snapshot?.resultId ? report : null;
-  const result = state.status === "results" ? state.data : storedReport?.result;
-  const analysisContext = result?.analysisContext;
   const isActiveRun = state.status === "loading" && snapshot?.id === runId;
-  const isCompletedRun = Boolean(result || snapshot?.resultId);
+  const isCompletedRun = Boolean(snapshot?.resultId || state.status === "results");
+  const evolutionCandidates = useStoredEvolutionCandidates();
+  const workflowLabels = t.dashboard.runPage.timeline.workflowLabels as Record<string, string>;
+  const relatedEvolutionCandidate =
+    snapshot?.resultId
+      ? evolutionCandidates.find(
+          (candidate) => candidate.sourceReportId === snapshot.resultId
+        ) ?? null
+      : null;
+
+  useEffect(() => {
+    if (!snapshot?.resultId) {
+      return;
+    }
+
+    router.replace(`/dashboard/reports/${snapshot.resultId}`);
+  }, [router, snapshot?.resultId]);
+
+  const formatRunPageText = (text: string) =>
+    text
+      .replace("{id}", snapshot?.id ?? "")
+      .replace("{time}", formatTimestamp(snapshot?.createdAt ?? new Date().toISOString()))
+      .replace("{count}", String(evolutionCandidates.length));
 
   const openReport = () => {
     if (!snapshot?.resultId) {
@@ -163,10 +204,8 @@ export default function AuditRunPage() {
       <div className="min-h-screen bg-dark-900 px-4 py-8 text-slate-200 sm:px-6 lg:px-8">
         <Card className="mx-auto mt-16 max-w-2xl border-dark-600/50 bg-dark-700/50">
           <CardHeader>
-            <CardTitle className="text-white">{t.dashboard.reportPage.reportMissing}</CardTitle>
-            <CardDescription className="text-slate-400">
-              {t.dashboard.reportPage.reportMissingDesc}
-            </CardDescription>
+            <CardTitle className="text-white">{t.dashboard.runPage.noRunIdTitle}</CardTitle>
+            <CardDescription className="text-slate-400">{t.dashboard.runPage.noRunIdDesc}</CardDescription>
           </CardHeader>
           <CardContent>
             <Button className="w-full bg-gradient-to-r from-solana-purple to-solana-blue text-white" onClick={backToDashboard}>
@@ -190,10 +229,8 @@ export default function AuditRunPage() {
           </div>
           <Card className="border-dark-600/50 bg-dark-700/50">
             <CardHeader>
-              <CardTitle className="text-white">Run snapshot not found</CardTitle>
-              <CardDescription className="text-slate-400">
-                The stored run snapshot is no longer available in local storage.
-              </CardDescription>
+              <CardTitle className="text-white">{t.dashboard.runPage.noSnapshotTitle}</CardTitle>
+              <CardDescription className="text-slate-400">{t.dashboard.runPage.noSnapshotDesc}</CardDescription>
             </CardHeader>
             <CardContent>
               <Button className="w-full bg-gradient-to-r from-solana-purple to-solana-blue text-white" onClick={backToDashboard}>
@@ -213,14 +250,12 @@ export default function AuditRunPage() {
           <div>
             <div className="flex items-center gap-2 text-sm text-slate-500">
               <Layers3 className="h-4 w-4 text-solana-purple" />
-              Dedicated Run
+              {t.dashboard.runPage.dedicatedRun}
             </div>
             <h1 className="mt-2 text-3xl font-bold text-white sm:text-4xl">
-              {isCompletedRun ? "Run complete" : "Live audit run"}
+              {isCompletedRun ? t.dashboard.runPage.runCompleteTitle : t.dashboard.runPage.liveRunTitle}
             </h1>
-            <p className="mt-2 text-sm text-slate-400">
-              Snapshot {snapshot.id} saved {formatTimestamp(snapshot.createdAt)}
-            </p>
+            <p className="mt-2 text-sm text-slate-400">{formatRunPageText(t.dashboard.runPage.snapshotSaved)}</p>
           </div>
 
           <div className="flex flex-wrap gap-2">
@@ -231,7 +266,7 @@ export default function AuditRunPage() {
             {snapshot.resultId ? (
               <Button variant="outline" className="border-dark-600/50 bg-dark-800/50 text-slate-200" onClick={openReport}>
                 <ArrowUpRight className="h-4 w-4" />
-                Open report
+                {t.dashboard.runPage.openReport}
               </Button>
             ) : null}
           </div>
@@ -243,19 +278,20 @@ export default function AuditRunPage() {
               <CardHeader className="pb-3">
                 <CardTitle className="flex items-center gap-2 text-base text-white">
                   <ShieldCheck className="h-4 w-4 text-solana-green" />
-                  Run Snapshot
+                  {t.dashboard.runPage.runSnapshot}
                 </CardTitle>
                 <CardDescription className="text-slate-400">
                   {snapshot.inputSummary.sourceMode === "github"
                     ? t.dashboard.githubTab
                     : t.dashboard.sourceTab}
-                  {" "}input captured for this run
+                  {" "}
+                  {t.dashboard.runPage.inputCaptured}
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4 pt-0">
                 <div className="rounded-2xl border border-dark-600/60 bg-dark-900/40 p-4">
                   <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-slate-500">
-                    Run ID
+                    {t.dashboard.runPage.runId}
                   </p>
                   <p className="mt-2 break-all text-sm font-medium text-white">{snapshot.id}</p>
                 </div>
@@ -267,42 +303,101 @@ export default function AuditRunPage() {
                       : t.dashboard.sourceTab}
                   </Badge>
                   <Badge variant="outline" className="border-dark-500 text-slate-200">
-                    {snapshot.progress}% progress
+                    {snapshot.progress}% {t.dashboard.runPage.progress}
                   </Badge>
                   <Badge variant="outline" className="border-dark-500 text-slate-200">
-                    {snapshot.inputSummary.fileCount} files
+                    {snapshot.inputSummary.fileCount} {t.dashboard.runPage.files}
                   </Badge>
                   <Badge variant="outline" className="border-dark-500 text-slate-200">
-                    {snapshot.currentWorkflow || "workflow"}
+                    {formatWorkflowKey(
+                      snapshot.currentWorkflow,
+                      workflowLabels,
+                      t.dashboard.runPage.timeline.workflowFallback
+                    )}
                   </Badge>
                 </div>
 
                 <div className="rounded-2xl border border-dark-600/60 bg-dark-900/40 p-4">
                   <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-slate-500">
-                    Latest state
+                    {t.dashboard.runPage.latestState}
                   </p>
                   <p className="mt-2 text-sm text-slate-200">
                     {isActiveRun
                       ? state.stage
                       : isCompletedRun
-                        ? "Results stored locally"
-                        : "Waiting for the first snapshot"}
+                        ? t.dashboard.runPage.resultsStoredLocally
+                        : t.dashboard.runPage.waitingForFirstSnapshot}
                   </p>
                   <p className="mt-2 text-xs text-slate-500">
                     {isActiveRun
-                      ? state.phaseDetail || "Streaming live audit progress..."
+                      ? state.phaseDetail || t.dashboard.runPage.streamingLiveProgress
                       : snapshot.resultId
-                        ? "A saved report is available from this run."
-                        : "The latest snapshot is read from local storage."}
+                        ? t.dashboard.runPage.savedReportAvailable
+                        : t.dashboard.runPage.latestSnapshotFromStorage}
                   </p>
                 </div>
 
                 {snapshot.resultId ? (
                   <Button className="w-full bg-gradient-to-r from-solana-purple to-solana-blue text-white" onClick={openReport}>
                     <ArrowUpRight className="h-4 w-4" />
-                    Open saved report
+                    {t.dashboard.runPage.openSavedReport}
                   </Button>
                 ) : null}
+
+                <Card className="border-dark-600/50 bg-dark-900/30">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base text-white">{t.dashboard.runPage.selfEvolution.title}</CardTitle>
+                    <CardDescription className="text-slate-400">
+                      {snapshot.resultId
+                        ? t.dashboard.runPage.selfEvolution.triggered
+                        : t.dashboard.runPage.selfEvolution.notTriggered}
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-3 pt-0">
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <Badge
+                        variant="outline"
+                        className={relatedEvolutionCandidate ? "border-solana-green/30 bg-solana-green/10 text-solana-green" : "border-dark-500 text-slate-300"}
+                      >
+                        {relatedEvolutionCandidate ? t.dashboard.runPage.selfEvolution.yes : t.dashboard.runPage.selfEvolution.no}
+                      </Badge>
+                      <Badge variant="outline" className="border-dark-500 text-slate-200">
+                        {relatedEvolutionCandidate
+                          ? t.dashboard.regressionArchivePage.statusLabels[
+                              relatedEvolutionCandidate.status as keyof typeof t.dashboard.regressionArchivePage.statusLabels
+                            ]
+                          : t.dashboard.runPage.selfEvolution.noCandidate}
+                      </Badge>
+                    </div>
+
+                    {relatedEvolutionCandidate ? (
+                      <div className="space-y-2 rounded-2xl border border-dark-600/60 bg-dark-900/40 p-3">
+                        <p className="text-[10px] uppercase tracking-wide text-slate-500">
+                          {t.dashboard.runPage.selfEvolution.candidate}
+                        </p>
+                        <p className="break-all text-xs text-slate-200">{relatedEvolutionCandidate.id}</p>
+                        <p className="text-xs text-slate-400">
+                          {t.dashboard.regressionArchivePage.kindLabels[
+                            relatedEvolutionCandidate.kind as keyof typeof t.dashboard.regressionArchivePage.kindLabels
+                          ]}{" "}
+                          · {relatedEvolutionCandidate.target}
+                        </p>
+                        <p className="text-xs text-slate-500">
+                          {relatedEvolutionCandidate.sourceReportId
+                            ? `${t.dashboard.runPage.selfEvolution.reportLabel}: ${relatedEvolutionCandidate.sourceReportId}`
+                            : null}
+                          {relatedEvolutionCandidate.sourceMemoryId
+                            ? `${relatedEvolutionCandidate.sourceReportId ? " · " : ""}${t.dashboard.runPage.selfEvolution.memoryLabel}: ${relatedEvolutionCandidate.sourceMemoryId}`
+                            : null}
+                        </p>
+                      </div>
+                    ) : snapshot.resultId ? (
+                      <p className="text-xs leading-relaxed text-slate-400">
+                        {t.dashboard.runPage.selfEvolution.waitingForCandidate}
+                      </p>
+                    ) : null}
+                  </CardContent>
+                </Card>
               </CardContent>
             </Card>
 
@@ -311,10 +406,10 @@ export default function AuditRunPage() {
                 <CardHeader className="pb-3">
                   <CardTitle className="flex items-center gap-2 text-base text-white">
                     <Clock3 className="h-4 w-4 text-solana-purple" />
-                    Live status
+                    {t.dashboard.runPage.liveStatus}
                   </CardTitle>
                   <CardDescription className="text-slate-400">
-                    The shared provider keeps this SSE stream alive while you navigate.
+                    {t.dashboard.runPage.sharedProviderKeepsStreamAlive}
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
@@ -336,7 +431,7 @@ export default function AuditRunPage() {
           <div className="space-y-6">
             <AuditExecutionPanel
               progress={state.status === "loading" ? state.progress : snapshot.progress}
-              stage={state.status === "loading" ? state.stage : isCompletedRun ? "Complete!" : "Waiting for updates"}
+              stage={state.status === "loading" ? state.stage : isCompletedRun ? t.dashboard.runPage.runCompleteTitle : t.dashboard.runPage.waitingForUpdates}
               phase={
                 state.status === "loading"
                   ? state.phase
@@ -346,19 +441,17 @@ export default function AuditRunPage() {
                 state.status === "loading"
                   ? state.phaseDetail
                   : snapshot.resultId
-                    ? "Run complete and report saved locally."
-                    : "Latest run snapshot loaded from local storage."
+                    ? t.dashboard.runPage.runCompleteDetail
+                    : t.dashboard.runPage.snapshotLoadedFromStorage
               }
               timeline={
                 state.status === "loading"
                   ? state.timeline
                   : snapshot.timeline
               }
+              finalized={isCompletedRun}
+              title={t.dashboard.runPage.liveWorkflowTitle}
             />
-
-            {analysisContext ? (
-              <AnalysisSummaryPanel analysisContext={analysisContext} result={result} />
-            ) : null}
           </div>
         </div>
       </div>
