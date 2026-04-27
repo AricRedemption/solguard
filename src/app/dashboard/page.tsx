@@ -1,9 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
-import { AlertTriangle, Clock, Gauge, RotateCcw, Shield, Zap } from "lucide-react";
+import { AlertTriangle, ArrowRight, Clock, Gauge, RotateCcw, Shield, Zap } from "lucide-react";
 import { useAuditSession } from "@/components/dashboard/AuditSessionProvider";
 import { SettingsPanel } from "@/components/dashboard/SettingsPanel";
 import { FileUploadZone } from "@/components/dashboard/FileUploadZone";
@@ -145,6 +146,13 @@ export default function DashboardPage() {
             </span>
           </div>
           <div className="flex items-center gap-2 rounded-full border border-dark-600/50 bg-dark-800/50 p-1">
+            <Link
+              href="/dashboard/evolution"
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-sm font-medium text-slate-300 transition-colors hover:bg-dark-700/70 hover:text-white"
+            >
+              <Clock className="h-4 w-4" />
+              {t.dashboard.evolutionPage.title}
+            </Link>
             <LanguageSwitcher className="hidden sm:flex" />
             <SettingsPanel />
             {showNewAudit ? (
@@ -246,19 +254,44 @@ export default function DashboardPage() {
           </Card>
 
           {!isActiveRun ? (
-            <div className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              {dashboardFeatures.map((feature) => (
-                <Card
-                  key={feature.title}
-                  className="border-dark-600/50 bg-dark-700/30 transition-all hover:border-solana-purple/30"
-                >
-                  <CardContent className="pt-4">
-                    <feature.icon className="mb-2 h-5 w-5 text-solana-purple" />
-                    <h3 className="text-sm font-semibold text-white">{feature.title}</h3>
-                    <p className="text-xs text-slate-500">{feature.desc}</p>
-                  </CardContent>
-                </Card>
-              ))}
+            <div className="mt-12 space-y-4">
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                {dashboardFeatures.map((feature) => (
+                  <Card
+                    key={feature.title}
+                    className="border-dark-600/50 bg-dark-700/30 transition-all hover:border-solana-purple/30"
+                  >
+                    <CardContent className="pt-4">
+                      <feature.icon className="mb-2 h-5 w-5 text-solana-purple" />
+                      <h3 className="text-sm font-semibold text-white">{feature.title}</h3>
+                      <p className="text-xs text-slate-500">{feature.desc}</p>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+
+              <Card className="border-rose-900/30 bg-gradient-to-r from-rose-950/30 via-dark-700/40 to-amber-950/20">
+                <CardContent className="flex flex-col gap-4 pt-6 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.28em] text-rose-200/70">
+                      Regression Archive
+                    </p>
+                    <h3 className="mt-2 text-lg font-semibold text-white">Failure-first lessons</h3>
+                    <p className="mt-1 text-sm text-slate-400">
+                      Open the archive to see which failed candidates were rolled back, which stayed unproven, and
+                      what the system learned from those failures.
+                    </p>
+                  </div>
+
+                  <Link
+                    href="/dashboard/evolution/regressions"
+                    className="inline-flex items-center gap-2 rounded-full border border-rose-400/30 bg-rose-500/10 px-4 py-2 text-sm font-medium text-rose-100 transition-colors hover:border-rose-300/50 hover:bg-rose-500/15 hover:text-white"
+                  >
+                    Open archive
+                    <ArrowRight className="h-4 w-4" />
+                  </Link>
+                </CardContent>
+              </Card>
             </div>
           ) : null}
         </motion.div>

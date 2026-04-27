@@ -43,6 +43,7 @@ export interface AuditResult {
 }
 
 export type AuditSourceMode = "files" | "github";
+export type AuditMemorySourceType = "report" | "feedback";
 
 export interface AuditInputSummary {
   sourceMode: AuditSourceMode;
@@ -72,12 +73,114 @@ export interface AuditMemoryEntry {
   keySignals: string[];
   focusAreas: string[];
   confidence: number;
+  utility: number;
+  recency: number;
+  risk: number;
+  sourceType: AuditMemorySourceType;
+  recallCount: number;
+  lastRecalledAt?: string;
+}
+
+export interface AuditMemoryFeedbackInput {
+  reportId: string;
+  memoryId?: string;
+  outcome: "confirmed" | "needs_review" | "dismissed";
+  note?: string;
+}
+
+export type AuditEvolutionCandidateKind =
+  | "prompt_section_update"
+  | "summary_template_update"
+  | "retrieval_weight_update"
+  | "phase_routing_update"
+  | "memory_ranking_update"
+  | "heuristic_ordering_update";
+
+export type AuditEvolutionCandidateStatus =
+  | "candidate"
+  | "approved"
+  | "applied"
+  | "rejected"
+  | "reverted";
+
+export type AuditEvolutionCandidateRiskLevel = "low" | "medium" | "high";
+
+export type AuditRegressionFailureClass =
+  | "rollback"
+  | "rejected"
+  | "unproven"
+  | "applied"
+  | "under_review";
+
+export interface AuditEvolutionCandidateInput {
+  sourceReportId?: string;
+  sourceMemoryId?: string;
+  kind: AuditEvolutionCandidateKind;
+  target: string;
+  before: string;
+  after: string;
+  reason: string;
+  evidence: string[];
+  riskLevel: AuditEvolutionCandidateRiskLevel;
+}
+
+export interface AuditEvolutionCandidateRecord extends AuditEvolutionCandidateInput {
+  id: string;
+  createdAt: string;
+  status: AuditEvolutionCandidateStatus;
+  appliedAt?: string;
+  revertedAt?: string;
+}
+
+export interface AuditRegressionArchiveRecordSnapshot {
+  readonly id: string;
+  readonly createdAt: string;
+  readonly kind: AuditEvolutionCandidateKind;
+  readonly status: AuditEvolutionCandidateStatus;
+  readonly riskLevel: AuditEvolutionCandidateRiskLevel;
+  readonly target: string;
+  readonly reason: string;
+  readonly lesson: string;
+  readonly evidence: readonly string[];
+  readonly before: string;
+  readonly after: string;
+  readonly appliedAt?: string;
+  readonly revertedAt?: string;
+  readonly sourceReportId?: string;
+  readonly sourceMemoryId?: string;
+  readonly failureClass: AuditRegressionFailureClass;
+}
+
+export interface AuditRegressionArchiveClusterSnapshot extends AuditRegressionArchiveRecordSnapshot {
+  readonly clusterSize: number;
+  readonly dominantFailureClass: AuditRegressionFailureClass;
+  readonly strongEvidence: boolean;
+  readonly records: readonly AuditRegressionArchiveRecordSnapshot[];
+}
+
+export interface AuditRegressionArchiveSnapshot {
+  readonly clusters: readonly AuditRegressionArchiveClusterSnapshot[];
+}
+
+export interface AuditEvolutionLogDisplaySnapshot {
+  readonly id: string;
+  readonly createdAt: string;
+  readonly kind: AuditEvolutionCandidateKind;
+  readonly status: AuditEvolutionCandidateStatus;
+  readonly riskLevel: AuditEvolutionCandidateRiskLevel;
+  readonly target: string;
+  readonly reason: string;
+  readonly lesson: string;
+  readonly evidence: readonly string[];
+  readonly appliedAt?: string;
+  readonly revertedAt?: string;
 }
 
 export interface AuditReportRecord {
   id: string;
   createdAt: string;
   sourceMode: AuditSourceMode;
+  memorySaved: boolean;
   inputSummary: AuditInputSummary;
   llm: {
     provider: string;
@@ -222,4 +325,5 @@ export interface AuditRequest {
   githubUrls?: string[];
   programAddress?: string;
   llmConfig: LLMConfig;
+  awarenessEntries?: AuditMemoryEntry[];
 }
