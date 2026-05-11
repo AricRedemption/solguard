@@ -1,0 +1,142 @@
+rules:
+  - id: solana-missing-signer-check
+    languages: [rust]
+    message: "Account used for authorization without is_signer verification"
+    severity: ERROR
+    patterns:
+      - pattern: |
+          if $ACCOUNT.key() == $EXPECTED {
+              ...
+          }
+      - pattern-not: |
+          if $ACCOUNT.key() == $EXPECTED && $ACCOUNT.is_signer {
+              ...
+          }
+    metadata:
+      category: security
+      confidence: HIGH
+      source: trail-of-bits-solana-vulnerability-scanner
+
+  - id: solana-missing-ownership-check
+    languages: [rust]
+    message: "Account used without ownership verification"
+    severity: ERROR
+    patterns:
+      - pattern: |
+          $ACCOUNT.try_borrow_data()
+      - pattern-not-inside: |
+          require!($ACCOUNT.owner == $EXPECTED_OWNER, ...);
+          ...
+      - pattern-not-inside: |
+          if $ACCOUNT.owner != $EXPECTED_OWNER { ... }
+    metadata:
+      category: security
+      confidence: MEDIUM
+      source: trail-of-bits-solana-vulnerability-scanner
+
+  - id: solana-unchecked-cpi
+    languages: [rust]
+    message: "CPI to potentially user-controlled program ID"
+    severity: ERROR
+    patterns:
+      - pattern: |
+          invoke(&$CTX.ACCOUNTS.$PROGRAM, ...)
+      - pattern-not: |
+          invoke(&spl_token::id(), ...)
+      - pattern-not: |
+          invoke(&system_program::id(), ...)
+    metadata:
+      category: security
+      confidence: HIGH
+      source: trail-of-bits-solana-vulnerability-scanner
+
+  - id: solana-unchecked-cpi-signed
+    languages: [rust]
+    message: "invoke_signed to potentially user-controlled program ID"
+    severity: ERROR
+    patterns:
+      - pattern: |
+          invoke_signed(&$CTX.ACCOUNTS.$PROGRAM, ...)
+      - pattern-not: |
+          invoke_signed(&spl_token::id(), ...)
+      - pattern-not: |
+          invoke_signed(&system_program::id(), ...)
+    metadata:
+      category: security
+      confidence: HIGH
+      source: trail-of-bits-solana-vulnerability-scanner
+
+  - id: solana-pda-bump-not-verified
+    languages: [rust]
+    message: "PDA bump seed not verified against stored value"
+    severity: WARNING
+    patterns:
+      - pattern: |
+          Pubkey::find_program_address($SEEDS, &$PROGRAM_ID)
+      - pattern-not-inside: |
+          ... bump = $ACCOUNT.bump ...
+    metadata:
+      category: security
+      confidence: MEDIUM
+      source: trail-of-bits-solana-vulnerability-scanner
+
+  - id: solana-unchecked-account-type
+    languages: [rust]
+    message: "UncheckedAccount used without manual type/discriminator verification"
+    severity: WARNING
+    patterns:
+      - pattern: |
+          $ACCOUNT: UncheckedAccount<'info>
+      - pattern-not-inside: |
+          /// CHECK: ...
+    metadata:
+      category: security
+      confidence: LOW
+      source: trail-of-bits-solana-vulnerability-scanner
+
+  - id: solana-remaining-accounts-unvalidated
+    languages: [rust]
+    message: "remaining_accounts used without per-account validation"
+    severity: WARNING
+    patterns:
+      - pattern: |
+          for $ACCOUNT in ctx.remaining_accounts.iter() {
+              ...
+          }
+      - pattern-not-inside: |
+          require!($ACCOUNT.owner == ...);
+    metadata:
+      category: security
+      confidence: MEDIUM
+      source: solguard-custom
+
+  - id: solana-unbounded-loop
+    languages: [rust]
+    message: "Loop with potentially user-controlled bound — compute budget DoS risk"
+    severity: WARNING
+    patterns:
+      - pattern: |
+          for $I in 0..$USER_CONTROLLED {
+              ...
+          }
+      - pattern-not-inside: |
+          ... .min($MAX) ...
+    metadata:
+      category: security
+      confidence: LOW
+      source: solguard-custom
+
+  - id: solana-close-without-discriminator-clear
+    languages: [rust]
+    message: "Account closed without clearing discriminator — resurrection risk"
+    severity: WARNING
+    patterns:
+      - pattern: |
+          **$ACCOUNT.lamports.borrow_mut() = 0;
+      - pattern-not-inside: |
+          $DATA[0..8].fill(0);
+          ...
+    metadata:
+      category: security
+      confidence: MEDIUM
+      source: solguard-custom

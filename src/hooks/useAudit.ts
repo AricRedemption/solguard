@@ -9,9 +9,11 @@ import type {
   AuditResult,
   Vulnerability,
   WorkflowEvent,
+  AuditMemoryEntry,
 } from "@/types/audit";
 import type { LLMConfig } from "@/types/llm";
 import { AuditResultSchema } from "@/lib/audit/result-parser";
+import { getAwarenessEntries } from "@/lib/audit/awareness-store";
 
 const PHASE_PROGRESS_MAP: Record<number, number> = {
   1: 10,
@@ -100,15 +102,17 @@ export function useAudit() {
     timelineRef.current = [];
     runSnapshotRef.current = null;
 
+    const awarenessEntries: AuditMemoryEntry[] = getAwarenessEntries(5);
+
     setState({ status: "loading", progress: 0, stage: "Starting audit...", timeline: [] });
 
     try {
       const response = await fetch("/api/audit", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ files, githubUrls, llmConfig }),
-        signal: abortControllerRef.current.signal,
-      });
+      body: JSON.stringify({ files, githubUrls, llmConfig, awarenessEntries }),
+      signal: abortControllerRef.current.signal,
+    });
 
       if (!response.ok) {
         throw new Error(`HTTP error: ${response.status}`);

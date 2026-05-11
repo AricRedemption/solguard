@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   Archive,
@@ -19,12 +19,15 @@ import { cn } from "@/lib/utils";
 import {
   createRegressionArchiveSnapshot,
   getRegressionArchiveDominantFailureClass,
+  getRegressionArchiveAppliedCount,
   getRegressionArchiveRejectedCount,
   getRegressionArchiveRollbackCount,
   getRegressionArchiveStrongEvidenceCount,
   getRegressionArchiveTotalClusterCount,
   getRegressionArchiveUnprovenCount,
 } from "@/lib/audit/regression-archive";
+import { EVOLUTION_STORE_EVENT } from "@/lib/audit/evolution-store";
+import { useTranslation } from "@/lib/i18n";
 import type {
   AuditRegressionArchiveClusterSnapshot,
   AuditRegressionArchiveSnapshot,
@@ -36,8 +39,93 @@ const EVOLUTION_INDEX_KEY = "solguard-audit-evolution:index";
 
 type Tone = "neutral" | "good" | "warn" | "bad";
 
+type RegressionArchivePageCopy = {
+  title: string;
+  subtitle: string;
+  backToDashboard: string;
+  eyebrow: string;
+  heading: string;
+  description: string;
+  dominantFailureClass: string;
+  clustersArchived: string;
+  latestClusterPrefix: string;
+  waitingForFirstFailure: string;
+  rollbackClusters: string;
+  rollbackHint: string;
+  rejectedClusters: string;
+  rejectedHint: string;
+  unprovenClusters: string;
+  unprovenHint: string;
+  appliedClusters: string;
+  appliedHint: string;
+  strongEvidence: string;
+  strongEvidenceHint: string;
+  lessonStrip: string;
+  readOnly: string;
+  noClustersTitle: string;
+  noClustersBody: string;
+  backToEvolution: string;
+  failureCluster: string;
+  failureNote: string;
+  lesson: string;
+  before: string;
+  after: string;
+  evidenceBlocks: string;
+  noEvidence: string;
+  linkedReportContext: string;
+  noLinkedReports: string;
+  linkedMemoryContext: string;
+  noLinkedMemories: string;
+  recordsSuffix: string;
+  moreRecords: string;
+  status: string;
+  riskLevel: string;
+  reportLabel: string;
+  memoryLabel: string;
+  kindLabels: {
+    promptSectionUpdate: string;
+    summaryTemplateUpdate: string;
+    retrievalWeightUpdate: string;
+    phaseRoutingUpdate: string;
+    memoryRankingUpdate: string;
+    heuristicOrderingUpdate: string;
+  };
+  failureClassLabels: {
+    rollback: string;
+    rejected: string;
+    unproven: string;
+    applied: string;
+    underReview: string;
+  };
+  statusLabels: {
+    candidate: string;
+    approved: string;
+    applied: string;
+    rejected: string;
+    reverted: string;
+  };
+  lessonLabels: {
+    noRegression: string;
+    noRegressionBody: string;
+    rollbackDominates: string;
+    rollbackBody: string;
+    rejectionDominates: string;
+    rejectionBody: string;
+    unprovenDominates: string;
+    unprovenBody: string;
+    contrastOnly: string;
+    contrastOnlyBody: string;
+    underReview: string;
+    underReviewBody: string;
+    contrastCallout: string;
+    failureEvidenceCallout: string;
+    reviewBeforeReuse: string;
+  };
+};
+
 export interface RegressionArchiveSummary {
   totalClusters: number;
+  appliedClusters: number;
   rollbackClusters: number;
   rejectedClusters: number;
   unprovenClusters: number;
@@ -73,7 +161,29 @@ function formatTimestamp(value: string) {
   }
 }
 
-function formatKindLabel(kind: AuditRegressionArchiveClusterSnapshot["kind"]) {
+function formatKindLabel(
+  kind: AuditRegressionArchiveClusterSnapshot["kind"],
+  copy?: RegressionArchivePageCopy
+) {
+  if (copy) {
+    switch (kind) {
+      case "prompt_section_update":
+        return copy.kindLabels.promptSectionUpdate;
+      case "summary_template_update":
+        return copy.kindLabels.summaryTemplateUpdate;
+      case "retrieval_weight_update":
+        return copy.kindLabels.retrievalWeightUpdate;
+      case "phase_routing_update":
+        return copy.kindLabels.phaseRoutingUpdate;
+      case "memory_ranking_update":
+        return copy.kindLabels.memoryRankingUpdate;
+      case "heuristic_ordering_update":
+        return copy.kindLabels.heuristicOrderingUpdate;
+      default:
+        return kind;
+    }
+  }
+
   switch (kind) {
     case "prompt_section_update":
       return "Prompt section update";
@@ -92,7 +202,27 @@ function formatKindLabel(kind: AuditRegressionArchiveClusterSnapshot["kind"]) {
   }
 }
 
-function formatFailureClassLabel(failureClass: AuditRegressionFailureClass) {
+function formatFailureClassLabel(
+  failureClass: AuditRegressionFailureClass,
+  copy?: RegressionArchivePageCopy
+) {
+  if (copy) {
+    switch (failureClass) {
+      case "rollback":
+        return copy.failureClassLabels.rollback;
+      case "rejected":
+        return copy.failureClassLabels.rejected;
+      case "unproven":
+        return copy.failureClassLabels.unproven;
+      case "applied":
+        return copy.failureClassLabels.applied;
+      case "under_review":
+        return copy.failureClassLabels.underReview;
+      default:
+        return failureClass;
+    }
+  }
+
   switch (failureClass) {
     case "rollback":
       return "Rollback";
@@ -101,11 +231,48 @@ function formatFailureClassLabel(failureClass: AuditRegressionFailureClass) {
     case "unproven":
       return "Unproven";
     case "applied":
-      return "Applied";
+      return "Contrast";
     case "under_review":
       return "Under review";
     default:
       return failureClass;
+  }
+}
+
+function formatStatusLabel(
+  status: AuditRegressionArchiveClusterSnapshot["status"],
+  copy?: RegressionArchivePageCopy
+) {
+  if (copy) {
+    switch (status) {
+      case "candidate":
+        return copy.statusLabels.candidate;
+      case "approved":
+        return copy.statusLabels.approved;
+      case "applied":
+        return copy.statusLabels.applied;
+      case "rejected":
+        return copy.statusLabels.rejected;
+      case "reverted":
+        return copy.statusLabels.reverted;
+      default:
+        return status;
+    }
+  }
+
+  switch (status) {
+    case "candidate":
+      return "Candidate";
+    case "approved":
+      return "Approved";
+    case "applied":
+      return "Applied";
+    case "rejected":
+      return "Rejected";
+    case "reverted":
+      return "Reverted";
+    default:
+      return status;
   }
 }
 
@@ -118,7 +285,7 @@ function getFailureClassTone(failureClass: AuditRegressionFailureClass): Tone {
     case "unproven":
       return "neutral";
     case "applied":
-      return "good";
+      return "neutral";
     case "under_review":
       return "neutral";
     default:
@@ -127,6 +294,20 @@ function getFailureClassTone(failureClass: AuditRegressionFailureClass): Tone {
 }
 
 function getStatusTone(summary: RegressionArchiveSummary): Tone {
+  if (summary.totalClusters === 0) {
+    return "neutral";
+  }
+
+  if (
+    summary.appliedClusters > 0 &&
+    summary.appliedClusters === summary.totalClusters &&
+    summary.rollbackClusters === 0 &&
+    summary.rejectedClusters === 0 &&
+    summary.unprovenClusters === 0
+  ) {
+    return "neutral";
+  }
+
   if (summary.rollbackClusters > summary.rejectedClusters) {
     return "bad";
   }
@@ -156,10 +337,18 @@ function useRegressionArchiveSnapshot() {
       }
     };
 
+    const handleEvolutionStore = () => {
+      refresh();
+    };
+
     refresh();
     window.addEventListener("storage", handleStorage);
+    window.addEventListener(EVOLUTION_STORE_EVENT, handleEvolutionStore);
 
-    return () => window.removeEventListener("storage", handleStorage);
+    return () => {
+      window.removeEventListener("storage", handleStorage);
+      window.removeEventListener(EVOLUTION_STORE_EVENT, handleEvolutionStore);
+    };
   }, []);
 
   return archive;
@@ -168,6 +357,7 @@ function useRegressionArchiveSnapshot() {
 function createArchiveSummary(snapshot: AuditRegressionArchiveSnapshot): RegressionArchiveSummary {
   return {
     totalClusters: getRegressionArchiveTotalClusterCount(snapshot),
+    appliedClusters: getRegressionArchiveAppliedCount(snapshot),
     rollbackClusters: getRegressionArchiveRollbackCount(snapshot),
     rejectedClusters: getRegressionArchiveRejectedCount(snapshot),
     unprovenClusters: getRegressionArchiveUnprovenCount(snapshot),
@@ -177,8 +367,20 @@ function createArchiveSummary(snapshot: AuditRegressionArchiveSnapshot): Regress
   };
 }
 
-function buildArchiveLesson(summary: RegressionArchiveSummary): RegressionArchiveLesson {
+function buildArchiveLesson(
+  summary: RegressionArchiveSummary,
+  copy?: RegressionArchivePageCopy
+): RegressionArchiveLesson {
   if (summary.totalClusters === 0) {
+    if (copy) {
+      return {
+        title: copy.lessonLabels.noRegression,
+        body: copy.lessonLabels.noRegressionBody,
+        tone: "neutral",
+        callouts: [copy.readOnly, copy.lessonStrip, copy.lessonLabels.reviewBeforeReuse],
+      };
+    }
+
     return {
       title: "No regressions archived yet",
       body:
@@ -188,8 +390,54 @@ function buildArchiveLesson(summary: RegressionArchiveSummary): RegressionArchiv
     };
   }
 
+  if (
+    summary.appliedClusters > 0 &&
+    summary.appliedClusters === summary.totalClusters &&
+    summary.rollbackClusters === 0 &&
+    summary.rejectedClusters === 0 &&
+    summary.unprovenClusters === 0
+  ) {
+    if (copy) {
+      return {
+        title: copy.lessonLabels.contrastOnly,
+        body: copy.lessonLabels.contrastOnlyBody,
+        tone: "neutral",
+        callouts: [
+          `${summary.appliedClusters} ${copy.appliedClusters}`,
+          copy.lessonLabels.failureEvidenceCallout,
+          copy.lessonLabels.reviewBeforeReuse,
+        ],
+      };
+    }
+
+    return {
+      title: "Contrast-only archive",
+      body:
+        "These entries are retained as comparison signals, not as proof of improvement. The archive stays neutral until rollback, rejection, or unresolved proof appears.",
+      tone: "neutral",
+      callouts: [
+        `${summary.appliedClusters} contrast clusters`,
+        "Read-only archive",
+        "No primary failure class yet",
+      ],
+    };
+  }
+
   switch (summary.dominantFailureClass) {
     case "rollback":
+      if (copy) {
+        return {
+          title: copy.lessonLabels.rollbackDominates,
+          body: copy.lessonLabels.rollbackBody,
+          tone: "bad",
+          callouts: [
+            `${summary.rollbackClusters} ${copy.rollbackClusters}`,
+            `${summary.strongEvidenceClusters} ${copy.strongEvidence}`,
+            `${summary.totalClusters} ${copy.clustersArchived}`,
+          ],
+        };
+      }
+
       return {
         title: "Rollback dominates the archive",
         body:
@@ -202,6 +450,19 @@ function buildArchiveLesson(summary: RegressionArchiveSummary): RegressionArchiv
         ],
       };
     case "rejected":
+      if (copy) {
+        return {
+          title: copy.lessonLabels.rejectionDominates,
+          body: copy.lessonLabels.rejectionBody,
+          tone: "warn",
+          callouts: [
+            `${summary.rejectedClusters} ${copy.rejectedClusters}`,
+            `${summary.unprovenClusters} ${copy.unprovenClusters}`,
+            `${summary.totalClusters} ${copy.clustersArchived}`,
+          ],
+        };
+      }
+
       return {
         title: "Rejection is the main failure shape",
         body:
@@ -214,6 +475,19 @@ function buildArchiveLesson(summary: RegressionArchiveSummary): RegressionArchiv
         ],
       };
     case "unproven":
+      if (copy) {
+        return {
+          title: copy.lessonLabels.unprovenDominates,
+          body: copy.lessonLabels.unprovenBody,
+          tone: "neutral",
+          callouts: [
+            `${summary.unprovenClusters} ${copy.unprovenClusters}`,
+            `${summary.strongEvidenceClusters} ${copy.strongEvidence}`,
+            `${summary.totalClusters} ${copy.clustersArchived}`,
+          ],
+        };
+      }
+
       return {
         title: "The archive is still proving itself",
         body:
@@ -226,18 +500,44 @@ function buildArchiveLesson(summary: RegressionArchiveSummary): RegressionArchiv
         ],
       };
     case "applied":
+      if (copy) {
+        return {
+          title: copy.lessonLabels.contrastOnly,
+          body: copy.lessonLabels.contrastOnlyBody,
+          tone: "neutral",
+          callouts: [
+            `${summary.appliedClusters} ${copy.appliedClusters}`,
+            `${summary.strongEvidenceClusters} ${copy.strongEvidence}`,
+            copy.lessonLabels.reviewBeforeReuse,
+          ],
+        };
+      }
+
       return {
-        title: "Applied changes are leading",
+        title: "Applied records stay in contrast mode",
         body:
-          "The archive has moved past the experimental stage. Even so, the regression notebook keeps the after-state attached to the failure so reversions stay explainable.",
-        tone: "good",
+          "Applied entries are retained for comparison, but they do not drive the archive's main failure story. Wait for rollback, rejection, or unresolved proof before treating them as signal.",
+        tone: "neutral",
         callouts: [
+          "Contrast signal only",
           `${summary.totalClusters} total clusters`,
           `${summary.strongEvidenceClusters} strong-evidence clusters`,
-          "Failure evidence stays linked",
         ],
       };
     case "under_review":
+      if (copy) {
+        return {
+          title: copy.lessonLabels.underReview,
+          body: copy.lessonLabels.underReviewBody,
+          tone: "neutral",
+          callouts: [
+            `${summary.appliedClusters} ${copy.appliedClusters}`,
+            `${summary.strongEvidenceClusters} ${copy.strongEvidence}`,
+            copy.lessonLabels.reviewBeforeReuse,
+          ],
+        };
+      }
+
       return {
         title: "The archive is still under review",
         body:
@@ -259,18 +559,20 @@ export function buildRegressionArchiveSummary(
 }
 
 export function buildRegressionArchiveLesson(
-  snapshot: AuditRegressionArchiveSnapshot
+  snapshot: AuditRegressionArchiveSnapshot,
+  copy?: RegressionArchivePageCopy
 ): RegressionArchiveLesson {
-  return buildArchiveLesson(createArchiveSummary(snapshot));
+  return buildArchiveLesson(createArchiveSummary(snapshot), copy);
 }
 
 export function buildRegressionArchiveClusterModel(
-  cluster: AuditRegressionArchiveClusterSnapshot
+  cluster: AuditRegressionArchiveClusterSnapshot,
+  copy?: RegressionArchivePageCopy
 ): RegressionArchiveClusterModel {
   return {
     cluster,
-    kindLabel: formatKindLabel(cluster.kind),
-    failureClassLabel: formatFailureClassLabel(cluster.dominantFailureClass),
+    kindLabel: formatKindLabel(cluster.kind, copy),
+    failureClassLabel: formatFailureClassLabel(cluster.dominantFailureClass, copy),
     reportIds: Array.from(
       new Set(cluster.records.flatMap((record) => (record.sourceReportId ? [record.sourceReportId] : [])))
     ),
@@ -336,7 +638,17 @@ function SourceLink({ href, id, label }: { href: string; id: string; label: stri
   );
 }
 
-function ClusterCard({ model, index, total }: { model: RegressionArchiveClusterModel; index: number; total: number }) {
+function ClusterCard({
+  model,
+  index,
+  total,
+  copy,
+}: {
+  model: RegressionArchiveClusterModel;
+  index: number;
+  total: number;
+  copy: RegressionArchivePageCopy;
+}) {
   const { cluster, kindLabel, failureClassLabel, reportIds, memoryIds, evidence } = model;
   const headline = cluster.records[0];
   const hasDivider = index < total - 1;
@@ -352,17 +664,18 @@ function ClusterCard({ model, index, total }: { model: RegressionArchiveClusterM
         <CardHeader className="border-b border-rose-950/30 bg-gradient-to-r from-rose-950/30 via-slate-950 to-amber-950/20 pb-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <p className="text-[10px] font-semibold uppercase tracking-[0.28em] text-rose-200/70">
-                Failure cluster
-              </p>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.28em] text-rose-200/70">{copy.failureCluster}</p>
               <CardTitle className="mt-2 text-lg text-white">{kindLabel}</CardTitle>
               <CardDescription className="mt-1 text-slate-400">{cluster.target}</CardDescription>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <SeverityBadge label={`${cluster.clusterSize} records`} tone={getStatusTone(createArchiveSummary({ clusters: [cluster] }))} />
+              <SeverityBadge
+                label={`${cluster.clusterSize} ${copy.recordsSuffix}`}
+                tone={getStatusTone(createArchiveSummary({ clusters: [cluster] }))}
+              />
               <SeverityBadge label={failureClassLabel} tone={getFailureClassTone(cluster.dominantFailureClass)} />
               <SeverityBadge
-                label={cluster.strongEvidence ? "Strong evidence" : "Sparse evidence"}
+                label={cluster.strongEvidence ? copy.strongEvidence : copy.unprovenHint}
                 tone={cluster.strongEvidence ? "good" : "warn"}
               />
             </div>
@@ -375,14 +688,14 @@ function ClusterCard({ model, index, total }: { model: RegressionArchiveClusterM
               {formatTimestamp(cluster.createdAt)}
             </span>
             <span className="rounded-full border border-slate-800 bg-slate-900/60 px-3 py-1 uppercase tracking-[0.24em] text-slate-300">
-              {cluster.status}
+              {formatStatusLabel(cluster.status, copy)}
             </span>
             <span className="rounded-full border border-slate-800 bg-slate-900/60 px-3 py-1 uppercase tracking-[0.24em] text-slate-300">
-              {cluster.riskLevel} risk
+              {cluster.riskLevel} {copy.riskLevel}
             </span>
             {cluster.records.length > 1 ? (
               <span className="rounded-full border border-slate-800 bg-slate-900/60 px-3 py-1 uppercase tracking-[0.24em] text-slate-300">
-                +{cluster.records.length - 1} more records
+                +{cluster.records.length - 1} {copy.moreRecords}
               </span>
             ) : null}
           </div>
@@ -392,7 +705,7 @@ function ClusterCard({ model, index, total }: { model: RegressionArchiveClusterM
               <section className="rounded-2xl border border-rose-950/30 bg-slate-900/50 p-4">
                 <p className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.24em] text-rose-200/70">
                   <TriangleAlert className="h-3.5 w-3.5" />
-                  Failure note
+                  {copy.failureNote}
                 </p>
                 <p className="mt-3 text-sm leading-relaxed text-slate-200">{cluster.reason}</p>
               </section>
@@ -400,18 +713,18 @@ function ClusterCard({ model, index, total }: { model: RegressionArchiveClusterM
               <section className="rounded-2xl border border-rose-950/30 bg-slate-900/50 p-4">
                 <p className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.24em] text-rose-200/70">
                   <BookMarked className="h-3.5 w-3.5" />
-                  Lesson
+                  {copy.lesson}
                 </p>
                 <p className="mt-3 text-sm leading-relaxed text-slate-200">{cluster.lesson}</p>
               </section>
 
               <section className="grid gap-3 sm:grid-cols-2">
                 <div className="rounded-2xl border border-slate-800/80 bg-slate-900/50 p-4">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-slate-500">Before</p>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-slate-500">{copy.before}</p>
                   <p className="mt-2 text-sm leading-relaxed text-slate-200">{headline.before}</p>
                 </div>
                 <div className="rounded-2xl border border-slate-800/80 bg-slate-900/50 p-4">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-slate-500">After</p>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-slate-500">{copy.after}</p>
                   <p className="mt-2 text-sm leading-relaxed text-slate-200">{headline.after}</p>
                 </div>
               </section>
@@ -421,7 +734,7 @@ function ClusterCard({ model, index, total }: { model: RegressionArchiveClusterM
               <section className="rounded-2xl border border-slate-800/80 bg-slate-900/50 p-4">
                 <p className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.24em] text-slate-500">
                   <ScrollText className="h-3.5 w-3.5" />
-                  Evidence blocks
+                  {copy.evidenceBlocks}
                 </p>
                 <div className="mt-3 space-y-2">
                   {evidence.length > 0 ? (
@@ -434,7 +747,7 @@ function ClusterCard({ model, index, total }: { model: RegressionArchiveClusterM
                       </div>
                     ))
                   ) : (
-                    <p className="text-sm text-slate-500">No evidence blocks were captured for this cluster.</p>
+                    <p className="text-sm text-slate-500">{copy.noEvidence}</p>
                   )}
                 </div>
               </section>
@@ -442,13 +755,13 @@ function ClusterCard({ model, index, total }: { model: RegressionArchiveClusterM
               <section className="rounded-2xl border border-slate-800/80 bg-slate-900/50 p-4">
                 <p className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.24em] text-slate-500">
                   <FileText className="h-3.5 w-3.5" />
-                  Linked report context
+                  {copy.linkedReportContext}
                 </p>
                 <div className="mt-3 flex flex-wrap gap-2">
                   {reportIds.length > 0 ? (
-                    reportIds.map((id) => <SourceLink key={id} href={`/dashboard/reports/${id}`} id={id} label="Report" />)
+                    reportIds.map((id) => <SourceLink key={id} href={`/dashboard/reports/${id}`} id={id} label={copy.reportLabel} />)
                   ) : (
-                    <p className="text-sm text-slate-500">No linked reports were recorded.</p>
+                    <p className="text-sm text-slate-500">{copy.noLinkedReports}</p>
                   )}
                 </div>
               </section>
@@ -456,13 +769,13 @@ function ClusterCard({ model, index, total }: { model: RegressionArchiveClusterM
               <section className="rounded-2xl border border-slate-800/80 bg-slate-900/50 p-4">
                 <p className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.24em] text-slate-500">
                   <Layers3 className="h-3.5 w-3.5" />
-                  Linked memory context
+                  {copy.linkedMemoryContext}
                 </p>
                 <div className="mt-3 flex flex-wrap gap-2">
                   {memoryIds.length > 0 ? (
-                    memoryIds.map((id) => <SourceLink key={id} href="/dashboard/memory" id={id} label="Memory" />)
+                    memoryIds.map((id) => <SourceLink key={id} href="/dashboard/memory" id={id} label={copy.memoryLabel} />)
                   ) : (
-                    <p className="text-sm text-slate-500">No linked memories were recorded.</p>
+                    <p className="text-sm text-slate-500">{copy.noLinkedMemories}</p>
                   )}
                 </div>
               </section>
@@ -474,24 +787,21 @@ function ClusterCard({ model, index, total }: { model: RegressionArchiveClusterM
   );
 }
 
-function EmptyArchiveState() {
+function EmptyArchiveState({ copy }: { copy: RegressionArchivePageCopy }) {
   return (
     <div className="rounded-[1.75rem] border border-dashed border-rose-950/40 bg-slate-950/60 p-8 text-center shadow-[0_0_0_1px_rgba(127,29,29,0.08)]">
       <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl border border-rose-500/20 bg-rose-500/10">
         <Archive className="h-7 w-7 text-rose-200" />
       </div>
-      <h2 className="mt-5 text-xl font-semibold text-white">No regression clusters yet</h2>
-      <p className="mx-auto mt-3 max-w-xl text-sm leading-relaxed text-slate-400">
-        The archive is empty for now. Once a failure is captured, this page will group it by kind and target so the
-        regression pattern reads like a notebook instead of a timeline.
-      </p>
+      <h2 className="mt-5 text-xl font-semibold text-white">{copy.noClustersTitle}</h2>
+      <p className="mx-auto mt-3 max-w-xl text-sm leading-relaxed text-slate-400">{copy.noClustersBody}</p>
       <div className="mt-6 flex flex-wrap justify-center gap-2">
         <Link
           href="/dashboard/evolution"
           className="inline-flex items-center gap-2 rounded-full border border-slate-700/80 bg-slate-900/70 px-4 py-2 text-sm text-slate-200 transition-colors hover:border-slate-500 hover:text-white"
         >
           <ArrowLeft className="h-4 w-4" />
-          Back to Evolution Log
+          {copy.backToEvolution}
         </Link>
       </div>
     </div>
@@ -499,10 +809,15 @@ function EmptyArchiveState() {
 }
 
 export default function RegressionArchivePage() {
+  const { t } = useTranslation();
+  const copy = t.dashboard.regressionArchivePage;
   const archive = useRegressionArchiveSnapshot();
-  const summary = createArchiveSummary(archive);
-  const lesson = buildArchiveLesson(summary);
-  const clusterModels = archive.clusters.map((cluster) => buildRegressionArchiveClusterModel(cluster));
+  const summary = useMemo(() => createArchiveSummary(archive), [archive]);
+  const lesson = useMemo(() => buildArchiveLesson(summary, copy), [summary, copy]);
+  const clusterModels = useMemo(
+    () => archive.clusters.map((cluster) => buildRegressionArchiveClusterModel(cluster, copy)),
+    [archive, copy]
+  );
 
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(127,29,29,0.24),_transparent_30%),radial-gradient(circle_at_top_right,_rgba(217,119,6,0.18),_transparent_28%),linear-gradient(180deg,_#020617_0%,_#0f172a_40%,_#111827_100%)] px-4 py-8 text-slate-100 sm:px-6 lg:px-8">
@@ -511,13 +826,10 @@ export default function RegressionArchivePage() {
           <div>
             <div className="flex items-center gap-2 text-sm uppercase tracking-[0.28em] text-rose-200/70">
               <NotebookText className="h-4 w-4 text-rose-300" />
-              Regression archive
+              {copy.eyebrow}
             </div>
-            <h1 className="mt-3 text-3xl font-bold text-white sm:text-4xl">Failure notebook</h1>
-            <p className="mt-3 max-w-2xl text-sm leading-relaxed text-slate-400">
-              Clustered regressions, linked evidence, and the lesson each failure leaves behind. This view stays
-              read-only and intentionally failure-first.
-            </p>
+            <h1 className="mt-3 text-3xl font-bold text-white sm:text-4xl">{copy.heading}</h1>
+            <p className="mt-3 max-w-2xl text-sm leading-relaxed text-slate-400">{copy.description}</p>
           </div>
 
           <Link
@@ -525,47 +837,52 @@ export default function RegressionArchivePage() {
             className="inline-flex h-9 items-center gap-1.5 rounded-full border border-slate-700/70 bg-slate-950/50 px-3.5 text-sm font-medium text-slate-200 transition-colors hover:border-slate-500 hover:text-white"
           >
             <ArrowLeft className="h-4 w-4" />
-            Dashboard
+            {copy.backToDashboard}
           </Link>
         </div>
 
         <section className="rounded-[1.75rem] border border-rose-950/30 bg-slate-950/55 p-4 shadow-[0_24px_80px_rgba(2,6,23,0.32)] backdrop-blur-sm">
           <div className="grid gap-3 lg:grid-cols-[1.15fr_repeat(4,minmax(0,1fr))]">
             <div className="rounded-2xl border border-rose-500/20 bg-gradient-to-br from-rose-950/40 via-slate-950/80 to-amber-950/25 p-4">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.28em] text-rose-200/70">
-                Dominant failure class
-              </p>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.28em] text-rose-200/70">{copy.dominantFailureClass}</p>
               <div className="mt-3 flex flex-wrap items-center gap-2">
-                <SeverityBadge label={formatFailureClassLabel(summary.dominantFailureClass)} tone={getFailureClassTone(summary.dominantFailureClass)} />
-                <span className="text-sm text-slate-300">{summary.totalClusters} clusters archived</span>
+                <SeverityBadge
+                  label={formatFailureClassLabel(summary.dominantFailureClass, copy)}
+                  tone={getFailureClassTone(summary.dominantFailureClass)}
+                />
+                <span className="text-sm text-slate-300">
+                  {summary.totalClusters} {copy.clustersArchived}
+                </span>
               </div>
               <p className="mt-3 text-sm leading-relaxed text-slate-300">
-                {summary.latestClusterAt ? `Latest cluster: ${formatTimestamp(summary.latestClusterAt)}` : "Waiting for the first failure cluster."}
+                {summary.latestClusterAt
+                  ? `${copy.latestClusterPrefix}: ${formatTimestamp(summary.latestClusterAt)}`
+                  : copy.waitingForFirstFailure}
               </p>
             </div>
 
             <MetricPill
-              label="Rollback clusters"
+              label={copy.rollbackClusters}
               value={summary.rollbackClusters}
-              hint="Failures that had to be undone."
+              hint={copy.rollbackHint}
               tone={summary.rollbackClusters > 0 ? "bad" : "neutral"}
             />
             <MetricPill
-              label="Rejected clusters"
+              label={copy.rejectedClusters}
               value={summary.rejectedClusters}
-              hint="Candidates blocked before rollout."
+              hint={copy.rejectedHint}
               tone={summary.rejectedClusters > 0 ? "warn" : "neutral"}
             />
             <MetricPill
-              label="Unproven clusters"
+              label={copy.unprovenClusters}
               value={summary.unprovenClusters}
-              hint="Still waiting on enough proof."
+              hint={copy.unprovenHint}
               tone={summary.unprovenClusters > 0 ? "warn" : "neutral"}
             />
             <MetricPill
-              label="Strong evidence"
+              label={copy.strongEvidence}
               value={summary.strongEvidenceClusters}
-              hint="Clusters with redundant source context."
+              hint={copy.strongEvidenceHint}
               tone={summary.strongEvidenceClusters > 0 ? "good" : "neutral"}
             />
           </div>
@@ -576,13 +893,13 @@ export default function RegressionArchivePage() {
             <div className="max-w-3xl">
               <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.28em] text-amber-200/80">
                 <BookMarked className="h-4 w-4" />
-                Lesson strip
+                {copy.lessonStrip}
               </div>
               <h2 className="mt-3 text-2xl font-semibold text-white">{lesson.title}</h2>
               <p className="mt-3 text-sm leading-relaxed text-slate-200/90">{lesson.body}</p>
             </div>
 
-            <SeverityBadge label="Read-only" tone={getStatusTone(summary)} />
+            <SeverityBadge label={copy.readOnly} tone={getStatusTone(summary)} />
           </div>
 
           <div className="mt-5 grid gap-3 md:grid-cols-3">
@@ -601,11 +918,17 @@ export default function RegressionArchivePage() {
           {clusterModels.length > 0 ? (
             <div className="space-y-6">
               {clusterModels.map((model, index) => (
-                <ClusterCard key={model.cluster.id} model={model} index={index} total={clusterModels.length} />
+                <ClusterCard
+                  key={model.cluster.id}
+                  model={model}
+                  index={index}
+                  total={clusterModels.length}
+                  copy={copy}
+                />
               ))}
             </div>
           ) : (
-            <EmptyArchiveState />
+            <EmptyArchiveState copy={copy} />
           )}
         </section>
       </div>

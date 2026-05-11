@@ -18,6 +18,7 @@ import {
   buildReportShareSummary,
   getReportVerdictLabel,
 } from "@/lib/audit/report-presenter";
+import { buildReportEvidenceBlockModel } from "./evidence-block";
 
 const severityOrder: Severity[] = ["critical", "high", "medium", "low"];
 
@@ -589,46 +590,92 @@ export default function AuditReportPage() {
 
                       <div className="border-t border-dark-600/50 p-4 pt-3">
                         <div className="space-y-3">
-                          {group.findings.map((finding) => (
-                            <div
-                              key={finding.id}
-                              className="rounded-2xl border border-dark-600/50 bg-dark-800/45 p-4"
-                            >
-                              <div className="flex flex-wrap items-center justify-between gap-3">
-                                <div>
-                                  <p className="text-sm font-semibold text-white">
-                                    {finding.title}
-                                  </p>
-                                  {finding.location ? (
-                                    <p className="mt-1 truncate text-xs font-mono text-slate-500">
-                                      {finding.location}
+                          {group.findings.map((finding) => {
+                            const evidenceBlock = buildReportEvidenceBlockModel(finding.evidence, {
+                              spansLabel: t.dashboard.evidenceSpansLabel,
+                              noEvidenceLabel: t.dashboard.evolutionPage.noEvidence,
+                              snippetLimit: 120,
+                            });
+
+                            return (
+                              <div
+                                key={finding.id}
+                                className="rounded-2xl border border-dark-600/50 bg-dark-800/45 p-4"
+                              >
+                                <div className="flex flex-wrap items-center justify-between gap-3">
+                                  <div>
+                                    <p className="text-sm font-semibold text-white">
+                                      {finding.title}
                                     </p>
-                                  ) : null}
+                                    {finding.location ? (
+                                      <p className="mt-1 truncate text-xs font-mono text-slate-500">
+                                        {finding.location}
+                                      </p>
+                                    ) : null}
+                                  </div>
+                                  <div className="text-right text-[10px] uppercase tracking-wide text-slate-400">
+                                    <p>
+                                      {Math.round(finding.confidence * 100)}%
+                                      {" "}
+                                      {t.dashboard.reportPage.confidenceLabel}
+                                    </p>
+                                    <p className="mt-1">{reviewStatusLabel(finding.reviewStatus, t)}</p>
+                                  </div>
                                 </div>
-                                <div className="text-right text-[10px] uppercase tracking-wide text-slate-400">
-                                  <p>
-                                    {Math.round(finding.confidence * 100)}%
-                                    {" "}
-                                    {t.dashboard.reportPage.confidenceLabel}
-                                  </p>
-                                  <p className="mt-1">{reviewStatusLabel(finding.reviewStatus, t)}</p>
+                                <p className="mt-3 text-sm leading-relaxed text-slate-300">
+                                  {finding.description}
+                                </p>
+                                <div className="mt-3 rounded-xl border border-dark-600/60 bg-dark-900/40 p-3">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-slate-500">
+                                      {t.dashboard.evidenceLabel}
+                                    </p>
+                                    <p className="text-[10px] uppercase tracking-wide text-slate-500">
+                                      {evidenceBlock.summaryText}
+                                    </p>
+                                  </div>
+                                  {evidenceBlock.items.length > 0 ? (
+                                    <div className="mt-2 space-y-2">
+                                      {evidenceBlock.items.map((item) => (
+                                        <div key={item.key} className="rounded-lg border border-dark-600/50 bg-dark-950/50 p-2">
+                                          <p className="truncate font-mono text-[11px] text-slate-300">
+                                            {item.location}
+                                          </p>
+                                          {item.note ? (
+                                            <p className="mt-1 text-[11px] text-slate-500">
+                                              {item.note}
+                                            </p>
+                                          ) : null}
+                                          <p className="mt-1 text-xs text-slate-400">
+                                            {item.snippet}
+                                          </p>
+                                        </div>
+                                      ))}
+                                      {evidenceBlock.moreCount > 0 ? (
+                                        <p className="text-[11px] text-slate-500">
+                                          +{evidenceBlock.moreCount} more
+                                        </p>
+                                      ) : null}
+                                    </div>
+                                  ) : (
+                                    <p className="mt-2 text-xs text-slate-500">
+                                      {evidenceBlock.emptyText}
+                                    </p>
+                                  )}
                                 </div>
+                                {finding.recommendation ? (
+                                  <div className="mt-3 rounded-xl border border-solana-green/20 bg-solana-green/10 p-3">
+                                    <p className="text-xs font-medium text-solana-green">
+                                      {t.dashboard.recommendation}
+                                    </p>
+                                    <p className="mt-1 text-xs leading-relaxed text-slate-200">
+                                      {finding.recommendation}
+                                    </p>
+                                  </div>
+                                ) : null}
                               </div>
-                              <p className="mt-3 text-sm leading-relaxed text-slate-300">
-                                {finding.description}
-                              </p>
-                              {finding.recommendation ? (
-                                <div className="mt-3 rounded-xl border border-solana-green/20 bg-solana-green/10 p-3">
-                                  <p className="text-xs font-medium text-solana-green">
-                                    {t.dashboard.recommendation}
-                                  </p>
-                                  <p className="mt-1 text-xs leading-relaxed text-slate-200">
-                                    {finding.recommendation}
-                                  </p>
-                                </div>
-                              ) : null}
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       </div>
                     </details>

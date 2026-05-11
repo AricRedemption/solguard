@@ -3,33 +3,35 @@ import { Providers } from "./providers";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "SolGuard | Advanced Solana Program Security Auditor",
+  title: "SolGuard | Evidence-First Solana Pre-Audit Assistant",
   description:
-    "The most advanced open-source security auditor for Solana programs. Powered by multi-agent AI, 104 vulnerability patterns, and lightning-fast static analysis. Detect vulnerabilities before they become headlines.",
+    "Evidence-first pre-audit assistant for Solana programs. It helps gather context, evidence, and findings for manual security review.",
   keywords: [
     "Solana",
     "security",
     "audit",
+    "pre-audit",
     "smart contract",
     "program security",
+    "scanner",
     "vulnerability detection",
     "DeFi security",
-    "Solana auditor",
+    "manual review",
   ],
   authors: [{ name: "Alt Research" }],
   openGraph: {
-    title: "SolGuard | Advanced Solana Program Security Auditor",
+    title: "SolGuard | Evidence-First Solana Pre-Audit Assistant",
     description:
-      "The most advanced open-source security auditor for Solana programs. Powered by multi-agent AI and 104 vulnerability patterns.",
+      "Evidence-first pre-audit assistant for Solana programs. It helps gather context, evidence, and findings for manual security review.",
     type: "website",
     locale: "en_US",
     siteName: "SolGuard",
   },
   twitter: {
     card: "summary_large_image",
-    title: "SolGuard | Advanced Solana Program Security Auditor",
+    title: "SolGuard | Evidence-First Solana Pre-Audit Assistant",
     description:
-      "The most advanced open-source security auditor for Solana programs.",
+      "Evidence-first pre-audit assistant for Solana programs.",
     creator: "@solguard",
   },
   icons: {

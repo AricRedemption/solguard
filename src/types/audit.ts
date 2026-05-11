@@ -229,6 +229,8 @@ export interface FunctionInsight {
   externalCalls: boolean;
   signerChecks: boolean;
   ownershipChecks: boolean;
+  remainingAccountsChecks: boolean;
+  closeAuthorityChecks: boolean;
   evidence: CodeSpan[];
   riskSignals: string[];
 }
@@ -253,7 +255,7 @@ export interface TrustBoundaryInsight {
 export interface ValidationRule {
   name: string;
   file: string;
-  category: "signer" | "ownership" | "pda" | "constraint" | "cpi";
+  category: "signer" | "ownership" | "pda" | "constraint" | "cpi" | "remaining_accounts" | "close_authority";
   description: string;
   severity: "hard" | "soft";
   evidence: CodeSpan[];

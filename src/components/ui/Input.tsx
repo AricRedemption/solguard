@@ -1,30 +1,24 @@
-import { cn } from "@/lib/cn";
+import * as React from "react";
+import { Input as InputPrimitive } from "@base-ui/react/input";
 
-interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
-  icon?: React.ReactNode;
-  error?: string;
-}
+import { cn } from "@/lib/utils";
 
-export function Input({ icon, error, className, ...props }: InputProps) {
+function Input({
+  className,
+  type,
+  ...props
+}: React.ComponentProps<"input">) {
   return (
-    <div className="w-full">
-      <div className="relative">
-        {icon && (
-          <div className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
-            {icon}
-          </div>
-        )}
-        <input
-          className={cn(
-            "w-full rounded-lg border border-dark-600 bg-dark-800 px-4 py-3 text-sm text-white placeholder:text-slate-500 transition-colors focus:border-solana-purple focus:outline-none focus:ring-1 focus:ring-solana-purple/50",
-            icon && "pl-10",
-            error && "border-critical focus:border-critical focus:ring-critical/50",
-            className
-          )}
-          {...props}
-        />
-      </div>
-      {error && <p className="mt-1 text-xs text-critical">{error}</p>}
-    </div>
+    <InputPrimitive
+      type={type}
+      data-slot="input"
+      className={cn(
+        "h-10 w-full min-w-0 rounded-lg border border-input bg-transparent px-3 py-1 text-base transition-colors outline-none file:inline-flex file:h-6 file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-input/50 disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 md:text-sm dark:bg-input/30 dark:disabled:bg-input/80 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40",
+        className
+      )}
+      {...props}
+    />
   );
 }
+
+export { Input };
