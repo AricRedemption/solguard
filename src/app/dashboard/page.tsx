@@ -30,15 +30,15 @@ function RunLaunchCard({
   onCancel: () => void;
   cancelLabel: string;
 }) {
+  const { t } = useTranslation();
+
   return (
     <Card className="border-dark-600/50 bg-dark-700/50 backdrop-blur-sm">
       <CardContent className="space-y-4 pt-6">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <p className="text-sm font-medium text-white">{stage || "Starting audit..."}</p>
-            <p className="mt-1 text-xs text-slate-400">
-              The dedicated run page will open once the first run snapshot arrives.
-            </p>
+            <p className="text-sm font-medium text-white">{stage || t.dashboard.startingAudit}</p>
+            <p className="mt-1 text-xs text-slate-400">{t.dashboard.openingRunPage}</p>
           </div>
           <Badge variant="outline" className="border-dark-500 text-slate-200">
             {progress}%
@@ -202,7 +202,7 @@ export default function DashboardPage() {
 
                   {isRedirecting ? (
                     <div className="rounded-lg border border-dark-600/60 bg-dark-900/40 p-4 text-sm text-slate-300">
-                      Opening the dedicated run page...
+                      {t.dashboard.openingRunPage}
                     </div>
                   ) : null}
                 </>
@@ -274,20 +274,17 @@ export default function DashboardPage() {
                 <CardContent className="flex flex-col gap-4 pt-6 sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <p className="text-[10px] font-semibold uppercase tracking-[0.28em] text-rose-200/70">
-                      Regression Archive
+                      {t.dashboard.regressionArchiveCard.eyebrow}
                     </p>
-                    <h3 className="mt-2 text-lg font-semibold text-white">Failure-first lessons</h3>
-                    <p className="mt-1 text-sm text-slate-400">
-                      Open the archive to see which failed candidates were rolled back, which stayed unproven, and
-                      what the system learned from those failures.
-                    </p>
+                    <h3 className="mt-2 text-lg font-semibold text-white">{t.dashboard.regressionArchiveCard.title}</h3>
+                    <p className="mt-1 text-sm text-slate-400">{t.dashboard.regressionArchiveCard.description}</p>
                   </div>
 
                   <Link
                     href="/dashboard/evolution/regressions"
                     className="inline-flex items-center gap-2 rounded-full border border-rose-400/30 bg-rose-500/10 px-4 py-2 text-sm font-medium text-rose-100 transition-colors hover:border-rose-300/50 hover:bg-rose-500/15 hover:text-white"
                   >
-                    Open archive
+                    {t.dashboard.regressionArchiveCard.button}
                     <ArrowRight className="h-4 w-4" />
                   </Link>
                 </CardContent>

@@ -1,39 +1,57 @@
 import type { AuditReportRecord } from "@/types/audit";
+import { readStoredJson, writeStoredJson } from "@/lib/audit/storage";
 
 const REPORT_INDEX_KEY = "solguard-audit-reports:index";
 const REPORT_KEY_PREFIX = "solguard-audit-report:";
 
-function safeStorageAvailable(): boolean {
-  return typeof window !== "undefined" && Boolean(window.localStorage);
-}
+type JsonPrimitive = string | number | boolean | null | undefined;
 
-function readJSON<T>(key: string, fallback: T): T {
-  if (!safeStorageAvailable()) return fallback;
+type DeepReadonly<T> = T extends JsonPrimitive
+  ? T
+  : T extends (...args: unknown[]) => unknown
+    ? T
+    : T extends ReadonlyArray<infer U>
+      ? ReadonlyArray<DeepReadonly<U>>
+      : { readonly [K in keyof T]: DeepReadonly<T[K]> };
 
-  try {
-    const raw = window.localStorage.getItem(key);
-    if (!raw) return fallback;
-    return JSON.parse(raw) as T;
-  } catch (error) {
-    console.error("[audit/report-store] Failed to read storage", error);
-    return fallback;
-  }
-}
+export type AuditReportSnapshot = DeepReadonly<AuditReportRecord>;
 
-function writeJSON(key: string, value: unknown): boolean {
-  if (!safeStorageAvailable()) return false;
+type ReportStorageSnapshotSource = {
+  id: string;
+  createdAt: string;
+  sourceMode: AuditReportRecord["sourceMode"];
+  inputSummary: {
+    fileCount: number;
+    githubUrls: readonly string[];
+  };
+  result: {
+    overallScore: number;
+    summary: AuditReportRecord["result"]["summary"];
+  };
+  memory: {
+    title: string;
+  };
+};
 
-  try {
-    window.localStorage.setItem(key, JSON.stringify(value));
-    return true;
-  } catch (error) {
-    console.error("[audit/report-store] Failed to write storage", error);
-    return false;
-  }
-}
-
-function sortReports(reports: AuditReportRecord[]): AuditReportRecord[] {
+function sortReports<T extends { createdAt: string }>(reports: readonly T[]): T[] {
   return [...reports].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+function deepFreeze<T>(value: T): DeepReadonly<T> {
+  if (!value || typeof value !== "object" || Object.isFrozen(value)) {
+    return value as DeepReadonly<T>;
+  }
+
+  Object.freeze(value);
+
+  for (const key of Object.keys(value as Record<string, unknown>)) {
+    const nested = (value as Record<string, unknown>)[key];
+    if (nested && typeof nested === "object") {
+      deepFreeze(nested);
+    }
+  }
+
+  return value as DeepReadonly<T>;
 }
 
 export function createAuditReportId(): string {
@@ -51,29 +69,29 @@ export function saveAuditReport(record: AuditReportRecord): boolean {
     ...reports.filter((item) => item.id !== record.id),
   ]).slice(0, 25);
 
-  const ok = writeJSON(REPORT_KEY_PREFIX + record.id, record);
+  const ok = writeStoredJson(REPORT_KEY_PREFIX + record.id, record);
   if (!ok) return false;
 
-  return writeJSON(
+  return writeStoredJson(
     REPORT_INDEX_KEY,
     nextReports.map((item) => createReportStorageSnapshot(item))
   );
 }
 
-export function loadAuditReport(reportId: string): AuditReportRecord | null {
+export function loadAuditReport(reportId: string): AuditReportSnapshot | null {
   if (!reportId) return null;
-  return readJSON<AuditReportRecord | null>(REPORT_KEY_PREFIX + reportId, null);
+  return deepFreeze(readStoredJson<AuditReportRecord | null>(REPORT_KEY_PREFIX + reportId, null));
 }
 
-export function listAuditReports(): AuditReportRecord[] {
-  const index = readJSON<Array<{ id: string }>>(REPORT_INDEX_KEY, []);
+export function listAuditReports(): AuditReportSnapshot[] {
+  const index = readStoredJson<Array<{ id: string }>>(REPORT_INDEX_KEY, []);
   const reports = index
     .map((item) => loadAuditReport(item.id))
-    .filter((item): item is AuditReportRecord => Boolean(item));
+    .filter((item): item is AuditReportSnapshot => Boolean(item));
   return sortReports(reports);
 }
 
-export function createReportStorageSnapshot(record: AuditReportRecord): {
+export function createReportStorageSnapshot(record: ReportStorageSnapshotSource): {
   id: string;
   createdAt: string;
   sourceMode: AuditReportRecord["sourceMode"];
@@ -88,7 +106,7 @@ export function createReportStorageSnapshot(record: AuditReportRecord): {
     createdAt: record.createdAt,
     sourceMode: record.sourceMode,
     fileCount: record.inputSummary.fileCount,
-    githubUrls: record.inputSummary.githubUrls,
+    githubUrls: [...record.inputSummary.githubUrls],
     overallScore: record.result.overallScore,
     summary: record.result.summary,
     memoryTitle: record.memory.title,

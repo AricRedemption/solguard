@@ -1,5 +1,7 @@
 import type { AuditReportSnapshot } from "@/lib/audit/report-store";
 import type { TranslationKeys } from "@/lib/i18n";
+import { buildConfidenceProfile } from "@/lib/audit/confidence";
+import { formatEvidenceLocation, formatEvidenceSnippet, isDerivedEvidence, normalizeEvidence } from "./evidence";
 
 type DashboardTranslations = TranslationKeys["dashboard"];
 
@@ -49,6 +51,17 @@ export function buildReportShareSummary(report: AuditReportSnapshot, t: Dashboar
     .slice(0, 3)
     .map((finding) => `${finding.severity.toUpperCase()}: ${finding.title}`);
   const verdictLabel = getReportVerdictLabel(report, t);
+  const confidenceProfile = report.result.analysisContext
+    ? buildConfidenceProfile(report.result.analysisContext as Parameters<typeof buildConfidenceProfile>[0], report.result)
+    : null;
+  const confidenceLabel =
+    confidenceProfile?.bucket === "strong"
+      ? "Strong confidence"
+      : confidenceProfile?.bucket === "supported"
+        ? "Supported confidence"
+        : confidenceProfile?.bucket === "thin"
+          ? "Thin confidence"
+          : null;
 
   return [
     t.reportPage.title,
@@ -56,6 +69,10 @@ export function buildReportShareSummary(report: AuditReportSnapshot, t: Dashboar
     `${t.reportPage.findingsCount}: ${findingCount}`,
     `${t.reportPage.criticalHighCount}: ${criticalHighCount}`,
     `${t.reportPage.reportVerdict}: ${verdictLabel}`,
+    confidenceLabel ? `Confidence: ${confidenceLabel}` : null,
+    confidenceProfile?.thinSurface && confidenceProfile.missingSignals.length
+      ? `Not verified: ${confidenceProfile.missingSignals.join(", ")}`
+      : null,
     `${t.reportPage.savedAt}: ${formatDate(report.createdAt)}`,
     topFindings.length > 0 ? `${t.keyFindings}: ${topFindings.join(" | ")}` : null,
     `${t.reportPage.reportId}: ${report.id}`,
@@ -70,6 +87,17 @@ export function buildReportMarkdown(report: AuditReportSnapshot, t: DashboardTra
   const highCount = report.result.summary.high;
   const mediumCount = report.result.summary.medium;
   const lowCount = report.result.summary.low;
+  const confidenceProfile = report.result.analysisContext
+    ? buildConfidenceProfile(report.result.analysisContext as Parameters<typeof buildConfidenceProfile>[0], report.result)
+    : null;
+  const confidenceBucketLabel =
+    confidenceProfile?.bucket === "strong"
+      ? "Strong confidence"
+      : confidenceProfile?.bucket === "supported"
+        ? "Supported confidence"
+        : confidenceProfile?.bucket === "thin"
+          ? "Thin confidence"
+          : null;
 
   const lines: string[] = [
     `# ${t.reportPage.title}`,
@@ -89,6 +117,27 @@ export function buildReportMarkdown(report: AuditReportSnapshot, t: DashboardTra
     `| ${t.reportPage.model} | ${report.llm.model} |`,
     `| ${t.reportPage.reportId} | ${report.id} |`,
     "",
+    "## Confidence Notes",
+    "",
+  ];
+
+  if (confidenceProfile) {
+    lines.push(
+      `- Bucket: ${confidenceBucketLabel || "Unknown"}`,
+      `- Average confidence: ${confidenceProfile.averageConfidencePercent}%`,
+      `- Structural signals: ${confidenceProfile.structuralSignals}`,
+      `- Evidence spans: ${confidenceProfile.evidenceSpans}`,
+      `- Consensus findings: ${confidenceProfile.consensusCount}`
+    );
+    if (confidenceProfile.thinSurface && confidenceProfile.missingSignals.length > 0) {
+      lines.push(`- Not verified: ${confidenceProfile.missingSignals.join(", ")}`);
+    }
+  } else {
+    lines.push("- Not verified: structural context unavailable");
+  }
+
+  lines.push(
+    "",
     "## Severity Breakdown",
     "",
     `- CRITICAL: ${criticalCount}`,
@@ -97,7 +146,7 @@ export function buildReportMarkdown(report: AuditReportSnapshot, t: DashboardTra
     `- LOW: ${lowCount}`,
     "",
     "## Key Findings",
-  ];
+  );
 
   if (report.result.vulnerabilities.length === 0) {
     lines.push("", t.noVulnerabilitiesFound, "", t.noVulnerabilitiesDesc);
@@ -111,6 +160,26 @@ export function buildReportMarkdown(report: AuditReportSnapshot, t: DashboardTra
       }
       lines.push(`- Status: ${finding.reviewStatus ?? t.reportPage.unreviewed}`);
       lines.push("", finding.description);
+
+      lines.push("", "#### Evidence");
+      const evidence = normalizeEvidence({
+        evidence: finding.evidence,
+        location: finding.location,
+        codeSnippet: finding.codeSnippet,
+      });
+      if (evidence && evidence.length > 0) {
+        for (const span of evidence) {
+          lines.push(`- ${formatEvidenceLocation(span)}`);
+          if (span.note) {
+            lines.push(`  - Note: ${span.note}`);
+          } else if (isDerivedEvidence(span)) {
+            lines.push("  - Note: Thin evidence");
+          }
+          lines.push(`  - Snippet: ${formatEvidenceSnippet(span.snippet)}`);
+        }
+      } else {
+        lines.push(`- ${t.evolutionPage.noEvidence}`);
+      }
 
       if (finding.recommendation) {
         lines.push("", `Recommendation: ${finding.recommendation}`);

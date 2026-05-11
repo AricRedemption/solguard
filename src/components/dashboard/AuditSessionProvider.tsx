@@ -10,7 +10,15 @@ import {
   type ReactNode,
 } from "react";
 import { useAudit } from "@/hooks/useAudit";
-import { buildAwarenessEntry, saveAwarenessEntry } from "@/lib/audit/awareness-store";
+import {
+  buildAwarenessEntry,
+  getAwarenessEntries,
+  saveAwarenessEntry,
+} from "@/lib/audit/awareness-store";
+import {
+  createEvolutionCandidate,
+  saveEvolutionCandidate,
+} from "@/lib/audit/evolution-store";
 import {
   createAuditReportId,
   saveAuditReport,
@@ -24,6 +32,7 @@ import {
   useLatestRunSnapshot,
 } from "@/lib/audit/session-store";
 import type {
+  AuditEvolutionCandidateInput,
   AuditReportRecord,
   AuditRunSnapshot,
   AuditSourceMode,
@@ -56,6 +65,46 @@ function buildInputSummary(context: AuditRunInputContext) {
       context.sourceMode === "files" ? context.files.length : context.githubUrls.length,
     fileNames: context.sourceMode === "files" ? context.files.map((file) => file.name) : [],
     githubUrls: context.githubUrls,
+  };
+}
+
+function buildRunEvolutionCandidate(
+  report: AuditReportRecord,
+  awarenessEntries: ReturnType<typeof getAwarenessEntries>
+): AuditEvolutionCandidateInput {
+  const highSeverityCount = report.result.summary.critical + report.result.summary.high;
+  const findingCount = report.result.vulnerabilities.length;
+  const topAwarenessEntry = awarenessEntries[0];
+  const lesson =
+    highSeverityCount > 0
+      ? `Keep report-derived lessons visible when a run surfaces ${highSeverityCount} high-severity findings.`
+      : findingCount > 0
+        ? `Keep lower-severity findings visible as review cues instead of burying them after a completed run.`
+        : "Keep clean runs visible as calibration signals so future audits can compare against them.";
+
+  return {
+    sourceReportId: report.id,
+    sourceMemoryId: report.memory.id,
+    kind: "heuristic_ordering_update",
+    target: lesson,
+    before: topAwarenessEntry
+      ? `Top awareness entry before append: ${topAwarenessEntry.title}`
+      : "No awareness entries were present before append.",
+    after: `${report.memory.title} | ${report.memory.summary}`,
+    reason: [
+      lesson,
+      `Report: ${report.id}`,
+      `Awareness snapshot size: ${awarenessEntries.length}`,
+      topAwarenessEntry ? `Top awareness entry: ${topAwarenessEntry.title}` : null,
+    ]
+      .filter((item): item is string => Boolean(item))
+      .join(" · "),
+    evidence: [
+      report.id,
+      report.memory.id,
+      ...awarenessEntries.slice(0, 3).map((entry) => entry.id),
+    ],
+    riskLevel: highSeverityCount > 0 ? "medium" : "low",
   };
 }
 
@@ -123,7 +172,7 @@ export function AuditSessionProvider({ children }: { children: ReactNode }) {
     const reportId = createAuditReportId();
     const createdAt = audit.state.data.timestamp;
     const inputSummary = buildInputSummary(context);
-    const report: AuditReportRecord = {
+    const reportMemory = buildAwarenessEntry({
       id: reportId,
       createdAt,
       sourceMode: context.sourceMode,
@@ -136,20 +185,29 @@ export function AuditSessionProvider({ children }: { children: ReactNode }) {
       },
       result: audit.state.data,
       timeline: audit.state.timeline,
-      memory: buildAwarenessEntry({
-        id: reportId,
-        createdAt,
-        sourceMode: context.sourceMode,
-        inputSummary,
-        llm: {
-          provider: context.llmConfig.provider,
-          supplier: context.llmConfig.supplier,
-          model: context.llmConfig.model,
-          baseURL: context.llmConfig.baseURL,
-        },
-        result: audit.state.data,
-        timeline: audit.state.timeline,
-      }),
+    });
+
+    const reportDraft: Omit<AuditReportRecord, "memorySaved"> = {
+      id: reportId,
+      createdAt,
+      sourceMode: context.sourceMode,
+      inputSummary,
+      llm: {
+        provider: context.llmConfig.provider,
+        supplier: context.llmConfig.supplier,
+        model: context.llmConfig.model,
+        baseURL: context.llmConfig.baseURL,
+      },
+      result: audit.state.data,
+      timeline: audit.state.timeline,
+      memory: reportMemory,
+    };
+
+    const awarenessSnapshot = getAwarenessEntries(5);
+    const memorySaved = saveAwarenessEntry(reportDraft.memory);
+    const report: AuditReportRecord = {
+      ...reportDraft,
+      memorySaved,
     };
 
     const saved = saveAuditReport(report);
@@ -158,7 +216,18 @@ export function AuditSessionProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    saveAwarenessEntry(report.memory);
+    if (!memorySaved) {
+      console.warn("[AuditSessionProvider] Failed to persist awareness memory");
+    }
+
+    const evolutionCandidate = createEvolutionCandidate(
+      buildRunEvolutionCandidate(report, awarenessSnapshot)
+    );
+    const evolutionSaved = saveEvolutionCandidate(evolutionCandidate);
+    if (!evolutionSaved) {
+      console.warn("[AuditSessionProvider] Failed to persist evolution candidate");
+    }
+
     savedReportIdRef.current = reportId;
 
     const runSnapshot = audit.state.runSnapshot;

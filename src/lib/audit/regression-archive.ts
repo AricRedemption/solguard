@@ -11,8 +11,8 @@ const FAILURE_CLASS_PRIORITY: Record<AuditRegressionFailureClass, number> = {
   rollback: 0,
   rejected: 1,
   unproven: 2,
-  applied: 3,
-  under_review: 4,
+  under_review: 3,
+  applied: 4,
 };
 
 function deepFreeze<T>(value: T): T {
@@ -68,7 +68,7 @@ function describeRegressionLesson(record: Pick<AuditEvolutionCandidateSnapshot, 
     case "approved":
       return `Still unproven because ${reason}.`;
     case "applied":
-      return `Applied as a contrast signal because ${reason}.`;
+      return `Recorded as a contrast signal because ${reason}.`;
     default:
       return `Under review because ${reason}.`;
   }
@@ -111,8 +111,13 @@ function chooseDominantFailureClass(
   records: readonly AuditRegressionArchiveRecordSnapshot[]
 ): AuditRegressionFailureClass {
   const counts = new Map<AuditRegressionFailureClass, number>();
+  const primaryRecords = records.filter((record) => record.failureClass !== "applied");
 
-  for (const record of records) {
+  if (primaryRecords.length === 0) {
+    return "under_review";
+  }
+
+  for (const record of primaryRecords) {
     counts.set(record.failureClass, (counts.get(record.failureClass) ?? 0) + 1);
   }
 
@@ -130,6 +135,13 @@ function chooseDominantFailureClass(
   }
 
   return dominant;
+}
+
+function countClustersByFailureClass(
+  snapshot: AuditRegressionArchiveSnapshot,
+  failureClass: AuditRegressionFailureClass
+): number {
+  return snapshot.clusters.filter((cluster) => cluster.dominantFailureClass === failureClass).length;
 }
 
 function hasStrongEvidence(records: readonly AuditEvolutionCandidateSnapshot[]): boolean {
@@ -211,25 +223,23 @@ export function getRegressionArchiveTotalClusterCount(snapshot: AuditRegressionA
 }
 
 export function getRegressionArchiveRollbackCount(snapshot: AuditRegressionArchiveSnapshot): number {
-  return snapshot.clusters.filter((cluster) =>
-    cluster.records.some((record) => record.failureClass === "rollback")
-  ).length;
+  return countClustersByFailureClass(snapshot, "rollback");
 }
 
 export function getRegressionArchiveRejectedCount(snapshot: AuditRegressionArchiveSnapshot): number {
-  return snapshot.clusters.filter((cluster) =>
-    cluster.records.some((record) => record.failureClass === "rejected")
-  ).length;
+  return countClustersByFailureClass(snapshot, "rejected");
 }
 
 export function getRegressionArchiveUnprovenCount(snapshot: AuditRegressionArchiveSnapshot): number {
-  return snapshot.clusters.filter((cluster) =>
-    cluster.records.some((record) => record.failureClass === "unproven")
-  ).length;
+  return countClustersByFailureClass(snapshot, "unproven");
 }
 
 export function getRegressionArchiveStrongEvidenceCount(snapshot: AuditRegressionArchiveSnapshot): number {
   return snapshot.clusters.filter((cluster) => cluster.strongEvidence).length;
+}
+
+export function getRegressionArchiveAppliedCount(snapshot: AuditRegressionArchiveSnapshot): number {
+  return snapshot.clusters.filter((cluster) => cluster.records.some((record) => record.failureClass === "applied")).length;
 }
 
 export function getRegressionArchiveDominantFailureClass(

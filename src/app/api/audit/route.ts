@@ -47,6 +47,7 @@ export async function POST(request: NextRequest) {
         const body: AuditRequest = await request.json();
         const runId = createAuditRunId();
         const createdAt = new Date().toISOString();
+        const awarenessEntries = Array.isArray(body.awarenessEntries) ? body.awarenessEntries : [];
 
         // Validate files or GitHub URLs exist
         if ((!body.files || body.files.length === 0) && (!body.githubUrls || body.githubUrls.length === 0)) {
@@ -160,6 +161,7 @@ export async function POST(request: NextRequest) {
         await runAuditPipeline({
           files: allFiles,
           llmConfig: body.llmConfig,
+          awarenessEntries,
           onEvent: sendEvent,
           signal: abortController.signal,
         });

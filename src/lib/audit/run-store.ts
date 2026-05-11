@@ -1,4 +1,5 @@
 import type { AuditRunSnapshot } from "@/types/audit";
+import { readStoredJson, writeStoredJson } from "@/lib/audit/storage";
 
 const RUN_KEY_PREFIX = "solguard-audit-run:";
 const RUN_STORE_EVENT = "solguard:audit-run-snapshot";
@@ -9,35 +10,6 @@ const runSnapshotCache = new Map<
     snapshot: AuditRunSnapshot;
   }
 >();
-
-function safeStorageAvailable(): boolean {
-  return typeof window !== "undefined" && Boolean(window.localStorage);
-}
-
-function readJSON<T>(key: string, fallback: T): T {
-  if (!safeStorageAvailable()) return fallback;
-
-  try {
-    const raw = window.localStorage.getItem(key);
-    if (!raw) return fallback;
-    return JSON.parse(raw) as T;
-  } catch (error) {
-    console.error("[audit/run-store] Failed to read storage", error);
-    return fallback;
-  }
-}
-
-function writeJSON(key: string, value: unknown): boolean {
-  if (!safeStorageAvailable()) return false;
-
-  try {
-    window.localStorage.setItem(key, JSON.stringify(value));
-    return true;
-  } catch (error) {
-    console.error("[audit/run-store] Failed to write storage", error);
-    return false;
-  }
-}
 
 export function createAuditRunStorageSnapshot(record: AuditRunSnapshot): AuditRunSnapshot {
   return {
@@ -56,7 +28,7 @@ export function saveAuditRunSnapshot(record: AuditRunSnapshot): boolean {
   const key = RUN_KEY_PREFIX + snapshot.id;
   const raw = JSON.stringify(snapshot);
 
-  if (!writeJSON(key, snapshot)) {
+  if (!writeStoredJson(key, snapshot)) {
     return false;
   }
 
@@ -76,12 +48,13 @@ export function loadAuditRunSnapshot(runId: string): AuditRunSnapshot | null {
   if (!runId) return null;
 
   const key = RUN_KEY_PREFIX + runId;
-  if (!safeStorageAvailable()) {
+  if (typeof window === "undefined") {
     return null;
   }
 
   try {
-    const raw = window.localStorage.getItem(key);
+    const storage = window.localStorage;
+    const raw = storage.getItem(key);
     if (!raw) {
       runSnapshotCache.delete(key);
       return null;
@@ -97,6 +70,6 @@ export function loadAuditRunSnapshot(runId: string): AuditRunSnapshot | null {
     return snapshot;
   } catch (error) {
     console.error("[audit/run-store] Failed to read storage", error);
-    return readJSON<AuditRunSnapshot | null>(key, null);
+    return readStoredJson<AuditRunSnapshot | null>(key, null);
   }
 }
