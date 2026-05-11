@@ -3,9 +3,13 @@ import { Providers } from "./providers";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "SolGuard | Evidence-First Solana Pre-Audit Assistant",
+  title: {
+    default: "SolGuard",
+    template: "%s | SolGuard",
+  },
+  applicationName: "SolGuard",
   description:
-    "Evidence-first pre-audit assistant for Solana programs. It helps gather context, evidence, and findings for manual security review.",
+    "AI-powered pre-audit assistant for Solana programs. It helps gather context, evidence, and findings for manual security review.",
   keywords: [
     "Solana",
     "security",
@@ -20,24 +24,27 @@ export const metadata: Metadata = {
   ],
   authors: [{ name: "Alt Research" }],
   openGraph: {
-    title: "SolGuard | Evidence-First Solana Pre-Audit Assistant",
+    title: "SolGuard",
     description:
-      "Evidence-first pre-audit assistant for Solana programs. It helps gather context, evidence, and findings for manual security review.",
+      "AI-powered pre-audit assistant for Solana programs. It helps gather context, evidence, and findings for manual security review.",
     type: "website",
     locale: "en_US",
     siteName: "SolGuard",
   },
   twitter: {
     card: "summary_large_image",
-    title: "SolGuard | Evidence-First Solana Pre-Audit Assistant",
+    title: "SolGuard",
     description:
-      "Evidence-first pre-audit assistant for Solana programs.",
-    creator: "@solguard",
+      "AI-powered pre-audit assistant for Solana programs.",
   },
   icons: {
     icon: [
       {
-        url: "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect fill='%239945FF' rx='20' width='100' height='100'/><path fill='%2314F195' d='M50 20L70 35V55L50 70L30 55V35L50 20Z'/></svg>",
+        url: "/solguard-logo.png",
+        type: "image/png",
+      },
+      {
+        url: "/solguard-logo.svg",
         type: "image/svg+xml",
       },
     ],
