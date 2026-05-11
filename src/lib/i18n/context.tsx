@@ -4,7 +4,6 @@ import {
   createContext,
   useContext,
   useState,
-  useRef,
   useCallback,
   useEffect,
   type ReactNode,
@@ -25,21 +24,11 @@ function getInitialLanguage(): Language {
   if (typeof window === "undefined") return "en";
   const stored = localStorage.getItem(STORAGE_KEY) as Language | null;
   if (stored && (stored === "en" || stored === "zh")) return stored;
-  const browserLang = navigator.language.toLowerCase();
-  if (browserLang.startsWith("zh")) return "zh";
   return "en";
 }
 
 export function I18nProvider({ children }: { children: ReactNode }) {
-  const [language, setLanguageState] = useState<Language>("en");
-  const initialized = useRef(false);
-
-  useEffect(() => {
-    if (!initialized.current) {
-      initialized.current = true;
-      setLanguageState(getInitialLanguage());
-    }
-  }, []);
+  const [language, setLanguageState] = useState<Language>(() => getInitialLanguage());
 
   useEffect(() => {
     document.cookie = `solguard-language=${language}; path=/; max-age=31536000; samesite=lax`;
