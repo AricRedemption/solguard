@@ -24,6 +24,18 @@
 .DS_Store
 *.pem
 
+# local workflow artifacts
+/.cursor/
+/findings.md
+/implementation-spec.md
+/progress.md
+/task_plan.md
+/team_findings.md
+/team_plan.md
+/team_progress.md
+/scripts/
+/public/skills/planning-with-files/
+
 # debug
 npm-debug.log*
 yarn-debug.log*
