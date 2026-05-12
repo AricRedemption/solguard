@@ -31,7 +31,8 @@ function compact(text: string, limit = 220): string {
 export async function runContextBuildingPhase(
   provider: LLMProvider,
   context: AgentContext,
-  onProgress: AgentProgressCallback
+  onProgress: AgentProgressCallback,
+  signal?: AbortSignal
 ): Promise<{
   architecture: string;
   trustBoundaries: string[];
@@ -51,7 +52,7 @@ export async function runContextBuildingPhase(
   const analysisContext = context.analysisContext ?? buildAnalysisContext(context.sourceFiles);
 
   // Step 1: Orchestrator does initial scan and identifies complex functions
-  const scanResult = await runOrchestratorScan(provider, context, analysisContext);
+  const scanResult = await runOrchestratorScan(provider, context, analysisContext, signal);
   onProgress({
     agentId: "orchestrator",
     agentName: "Orchestrator",
@@ -74,6 +75,7 @@ export async function runContextBuildingPhase(
         func,
         context,
         analysisContext,
+        signal,
         (event) => onProgress({
           ...event,
           progress: 20 + (idx * 80 / Math.max(scanResult.complexFunctions.length, 1)),
@@ -110,6 +112,69 @@ export async function runContextBuildingPhase(
   return synthesized;
 }
 
+export async function analyzeComplexFunctions(
+  provider: LLMProvider,
+  context: AgentContext,
+  complexFunctions: Array<{ name: string; file: string; code: string }>,
+  onProgress: AgentProgressCallback,
+  signal?: AbortSignal
+): Promise<{
+  keyInvariants: string[];
+  complexFunctions: Array<{ name: string; file: string; analysis: string }>;
+}> {
+  const analysisContext = context.analysisContext ?? buildAnalysisContext(context.sourceFiles);
+
+  onProgress({
+    agentId: "orchestrator",
+    agentName: "Orchestrator",
+    workflow: "context-building",
+    title: "Starting deep function analysis",
+    detail: `Analyzing ${complexFunctions.length} selected functions`,
+    inputSummary: complexFunctions.slice(0, 4).map((fn) => `${fn.file}::${fn.name}`).join(", "),
+    progress: 0,
+    status: "running",
+  });
+
+  const functionAnalyses = await Promise.all(
+    complexFunctions.map((func, idx) =>
+      runFunctionAnalyzer(
+        provider,
+        func,
+        context,
+        analysisContext,
+        signal,
+        (event) => onProgress({
+          ...event,
+          progress: Math.min(100, 10 + (idx * 90 / Math.max(complexFunctions.length, 1))),
+        })
+      )
+    )
+  );
+
+  const keyInvariants = functionAnalyses
+    .flatMap((analysis) => {
+      const match = analysis.analysis.match(/[Ii]nvariants?[:\s]*([^\n]+(?:\n[^\n]+)*)/);
+      return match ? match[1].split("\n").filter(Boolean) : [];
+    })
+    .slice(0, 10);
+
+  onProgress({
+    agentId: "orchestrator",
+    agentName: "Orchestrator",
+    workflow: "context-building",
+    title: "Deep function analysis complete",
+    detail: "Selected function analyses synthesized successfully",
+    outputSummary: `${functionAnalyses.length} functions analyzed, ${keyInvariants.length} invariants extracted`,
+    progress: 100,
+    status: "done",
+  });
+
+  return {
+    keyInvariants,
+    complexFunctions: functionAnalyses,
+  };
+}
+
 interface ScanResult {
   architecture: string;
   trustBoundaries: string[];
@@ -119,7 +184,8 @@ interface ScanResult {
 async function runOrchestratorScan(
   provider: LLMProvider,
   context: AgentContext,
-  analysisContext: ReturnType<typeof buildAnalysisContext>
+  analysisContext: ReturnType<typeof buildAnalysisContext>,
+  signal?: AbortSignal
 ): Promise<ScanResult> {
   const contextSummary = renderPromptContext(analysisContext);
   const candidateFunctions = analysisContext.hotspots
@@ -165,7 +231,15 @@ ${candidateFunctions || "none"}` },
   ];
 
   let fullResponse = "";
-  for await (const chunk of provider.callStreaming({ messages, maxTokens: 4096, temperature: 0 })) {
+  for await (const chunk of provider.callStreaming({
+    messages,
+    maxTokens: 4096,
+    temperature: 0,
+    signal,
+  })) {
+    if (signal?.aborted) {
+      throw signal.reason instanceof Error ? signal.reason : new DOMException("Aborted", "AbortError");
+    }
     fullResponse += chunk;
   }
 
@@ -193,6 +267,7 @@ async function runFunctionAnalyzer(
   func: { name: string; file: string; code: string },
   context: AgentContext,
   analysisContext: ReturnType<typeof buildAnalysisContext>,
+  signal: AbortSignal | undefined,
   onProgress: AgentProgressCallback
 ): Promise<{ name: string; file: string; analysis: string }> {
   const functionInfo = analysisContext.functions.find((candidate) => candidate.name === func.name && candidate.file === func.file);
@@ -253,7 +328,10 @@ Output your analysis as a structured report.` },
   ];
 
   let fullResponse = "";
-  for await (const chunk of provider.callStreaming({ messages, maxTokens: 4096, temperature: 0 })) {
+  for await (const chunk of provider.callStreaming({ messages, maxTokens: 4096, temperature: 0, signal })) {
+    if (signal?.aborted) {
+      throw signal.reason instanceof Error ? signal.reason : new DOMException("Aborted", "AbortError");
+    }
     fullResponse += chunk;
   }
 

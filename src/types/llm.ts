@@ -26,6 +26,7 @@ export interface LLMCallOptions {
   maxTokens?: number;
   temperature?: number;
   onChunk?: (chunk: string) => void;
+  signal?: AbortSignal;
 }
 
 export interface LLMResponse {

@@ -65,7 +65,7 @@ export class AnthropicProvider implements LLMProvider {
       temperature: options.temperature ?? 0,
       system: system || undefined,
       messages,
-    });
+    }, options.signal ? { signal: options.signal } : undefined);
 
     const textBlock = response.content.find((block) => block.type === "text");
     return {
@@ -91,7 +91,7 @@ export class AnthropicProvider implements LLMProvider {
       temperature: options.temperature ?? 0,
       system: system || undefined,
       messages,
-    });
+    }, options.signal ? { signal: options.signal } : undefined);
 
     for await (const event of stream) {
       if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
@@ -131,7 +131,7 @@ export class AnthropicProvider implements LLMProvider {
       temperature: options.temperature ?? 0,
       stream: true,
       messages: chatMessages,
-    });
+    }, options.signal ? { signal: options.signal } : undefined);
 
     for await (const chunk of stream) {
       const text = chunk.choices[0]?.delta?.content;

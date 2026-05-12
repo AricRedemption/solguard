@@ -5,6 +5,7 @@ import type { AuditRequest, AuditSSEEvent } from "@/types/audit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const maxDuration = 300;
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB per file
 const MAX_FILES = 50;

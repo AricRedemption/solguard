@@ -5,9 +5,10 @@ import type { PhasePrompt } from "../prompts/solana-adapter";
 import type { Phase1Result } from "./entry-point-discovery";
 import { parseJSON, Phase2ResultSchema } from "../result-parser";
 import { withRetry } from "@/lib/llm/provider";
-import { runContextBuildingPhase } from "../agents";
+import { analyzeComplexFunctions } from "../agents";
 import { renderPromptContext } from "../context-builder";
 import type { AgentProgressEvent } from "../agents/types";
+import { createTimeoutSignal, isTimeoutError } from "../timeout";
 
 export interface Phase2Result {
   architecture: string;
@@ -17,6 +18,8 @@ export interface Phase2Result {
   complexFunctions?: Array<{ name: string; file: string; analysis?: string; code?: string }>;
 }
 
+const CONTEXT_BUILDING_TIMEOUT_MS = 90_000;
+
 export async function runPhase2(
   provider: LLMProvider,
   sourceFiles: SourceFile[],
@@ -24,7 +27,8 @@ export async function runPhase2(
   phasePrompt: PhasePrompt,
   onProgress: (msg: string) => void,
   analysisContext?: AnalysisContext,
-  emitWorkflowEvent?: (item: WorkflowEvent) => void
+  emitWorkflowEvent?: (item: WorkflowEvent) => void,
+  signal?: AbortSignal
 ): Promise<Phase2Result> {
   onProgress("Building architectural context with multi-agent analysis...");
   emitWorkflowEvent?.({
@@ -39,6 +43,22 @@ export async function runPhase2(
     status: "running",
     progress: 0,
   });
+
+  if (!analysisContext || analysisContext.functions.length === 0) {
+    onProgress("No analyzable functions found, skipping deep context building");
+    emitWorkflowEvent?.({
+      id: `phase-2-skipped-${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      phase: 2,
+      phaseName: "Context Building",
+      workflow: "context-building",
+      title: "Context building skipped",
+      detail: "No analyzable functions were available for deep context building",
+      status: "warning",
+      progress: 100,
+    });
+    return { architecture: "", trustBoundaries: [], stateFlow: [], keyInvariants: [] };
+  }
 
   const contextSummary = analysisContext ? renderPromptContext(analysisContext) : "";
 
@@ -74,13 +94,22 @@ Output as JSON:
     },
   ];
 
+  const timeout = createTimeoutSignal(
+    CONTEXT_BUILDING_TIMEOUT_MS,
+    `Context building timed out after ${CONTEXT_BUILDING_TIMEOUT_MS / 1000} seconds`
+  );
   let fullResponse = "";
 
   try {
     fullResponse = await withRetry(
       async () => {
         let chunkBuffer = "";
-        for await (const chunk of provider.callStreaming({ messages, maxTokens: 4096, temperature: 0 })) {
+        for await (const chunk of provider.callStreaming({
+          messages,
+          maxTokens: 4096,
+          temperature: 0,
+          signal: timeout.signal,
+        })) {
           chunkBuffer += chunk;
         }
         return chunkBuffer;
@@ -94,9 +123,27 @@ Output as JSON:
       }
     );
   } catch (error) {
+    if (isTimeoutError(error)) {
+      console.error("[Phase2] Timed out:", error);
+      onProgress("Context building timed out, returning fallback results");
+      emitWorkflowEvent?.({
+        id: `phase-2-timeout-${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        phase: 2,
+        phaseName: "Context Building",
+        workflow: "context-building",
+        title: "Context building timed out",
+        detail: "Fallback context returned after timeout",
+        status: "warning",
+        progress: 100,
+      });
+      return { architecture: "", trustBoundaries: [], stateFlow: [], keyInvariants: [] };
+    }
     console.error("[Phase2] Failed after retries:", error);
     onProgress("LLM call failed, returning empty results");
     return { architecture: "", trustBoundaries: [], stateFlow: [], keyInvariants: [] };
+  } finally {
+    timeout.clear();
   }
 
   onProgress("Parsing context analysis...");
@@ -150,9 +197,14 @@ Output as JSON:
         analysisContext,
       };
 
-      const deepAnalysis = await runContextBuildingPhase(
+      const deepAnalysis = await analyzeComplexFunctions(
         provider,
         contextForAgents,
+        data.complexFunctions.map((func) => ({
+          name: func.name,
+          file: func.file,
+          code: func.analysis || "",
+        })),
         (event: AgentProgressEvent) => {
           onProgress(`[${event.agentName}] ${event.detail}`);
           emitWorkflowEvent?.({
@@ -170,7 +222,8 @@ Output as JSON:
             progress: event.progress,
             metrics: event.metrics,
           });
-        }
+        },
+        signal
       );
 
       // Merge deep analysis results

@@ -6,6 +6,7 @@ import type { Phase2Result } from "./context-building";
 import { withRetry } from "@/lib/llm/provider";
 import { parseJSON, Phase3ResultSchema } from "../result-parser";
 import { renderPromptContext } from "../context-builder";
+import { createTimeoutSignal, isTimeoutError } from "../timeout";
 
 export interface Phase3Result {
   findings: Array<{
@@ -40,7 +41,8 @@ export async function runPhase3(
   phasePrompt: PhasePrompt,
   onProgress: (msg: string) => void,
   analysisContext?: AnalysisContext,
-  emitWorkflowEvent?: (item: WorkflowEvent) => void
+  emitWorkflowEvent?: (item: WorkflowEvent) => void,
+  signal?: AbortSignal
 ): Promise<Phase3Result> {
   onProgress("Starting security audit with orchestrator...");
   emitWorkflowEvent?.({
@@ -108,13 +110,20 @@ Output as JSON:
 If no vulnerabilities found, return: { "findings": [] }` },
   ];
 
+  const timeout = createTimeoutSignal(60_000, "Security audit timed out after 60 seconds");
+  const requestSignal = signal ? AbortSignal.any([signal, timeout.signal]) : timeout.signal;
   let fullResponse = "";
 
   try {
     fullResponse = await withRetry(
       async () => {
         let chunkBuffer = "";
-        for await (const chunk of provider.callStreaming({ messages, maxTokens: 8192, temperature: 0 })) {
+        for await (const chunk of provider.callStreaming({
+          messages,
+          maxTokens: 8192,
+          temperature: 0,
+          signal: requestSignal,
+        })) {
           chunkBuffer += chunk;
         }
         return chunkBuffer;
@@ -128,9 +137,38 @@ If no vulnerabilities found, return: { "findings": [] }` },
       }
     );
   } catch (error) {
+    if (isTimeoutError(error)) {
+      console.error("[Phase3] Timed out:", error);
+      onProgress("Security audit timed out, returning empty results");
+      emitWorkflowEvent?.({
+        id: `phase-3-timeout-${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        phase: 3,
+        phaseName: "Security Audit",
+        workflow: "security-audit",
+        title: "Security audit timed out",
+        detail: "No findings returned after timeout",
+        status: "warning",
+        progress: 100,
+      });
+      return { findings: [] };
+    }
     console.error("[Phase3] Failed after retries:", error);
     onProgress("LLM call failed, returning empty results");
+    emitWorkflowEvent?.({
+      id: `phase-3-failed-${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      phase: 3,
+      phaseName: "Security Audit",
+      workflow: "security-audit",
+      title: "Security audit failed",
+      detail: "No findings returned after fallback",
+      status: "warning",
+      progress: 100,
+    });
     return { findings: [] };
+  } finally {
+    timeout.clear();
   }
 
   onProgress("Parsing vulnerability findings...");

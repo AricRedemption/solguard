@@ -6,6 +6,7 @@ import type { Phase3Result } from "./security-audit";
 import { Phase4ResultSchema } from "../result-parser";
 import { withRetry } from "@/lib/llm/provider";
 import { renderAnalysisContext } from "../context-builder";
+import { createTimeoutSignal, isTimeoutError } from "../timeout";
 
 export interface Phase4Result {
   variants: Phase3Result["findings"];
@@ -32,7 +33,8 @@ export async function runPhase4(
   phasePrompt: PhasePrompt,
   onProgress: (msg: string) => void,
   analysisContext?: AnalysisContext,
-  emitWorkflowEvent?: (item: WorkflowEvent) => void
+  emitWorkflowEvent?: (item: WorkflowEvent) => void,
+  signal?: AbortSignal
 ): Promise<Phase4Result> {
   if (phase3Result.findings.length === 0) {
     onProgress("No findings to analyze, skipping variant analysis");
@@ -107,13 +109,15 @@ export async function runPhase4(
         ],
       });
 
-      const result = await analyzeFindingWithVariants(
+  const result = await analyzeFindingWithVariants(
         provider,
         finding,
         codeContent,
         phasePrompt,
         category,
-        analysisContext
+        analysisContext,
+        signal,
+        emitWorkflowEvent
       );
 
       if (result.confirmed) {
@@ -192,7 +196,9 @@ async function analyzeFindingWithVariants(
   codeContent: string,
   phasePrompt: PhasePrompt,
   category: string,
-  analysisContext?: AnalysisContext
+  analysisContext?: AnalysisContext,
+  signal?: AbortSignal,
+  emitWorkflowEvent?: (item: WorkflowEvent) => void
 ): Promise<VariantResult> {
   const contextSummary = analysisContext ? renderAnalysisContext(analysisContext) : "";
 
@@ -233,13 +239,20 @@ Output as JSON:
 }` },
   ];
 
+  const timeout = createTimeoutSignal(60_000, `Variant analysis for ${finding.title} timed out after 60 seconds`);
+  const requestSignal = signal ? AbortSignal.any([signal, timeout.signal]) : timeout.signal;
   let fullResponse = "";
 
   try {
     fullResponse = await withRetry(
       async () => {
         let chunkBuffer = "";
-        for await (const chunk of provider.callStreaming({ messages, maxTokens: 4096, temperature: 0 })) {
+        for await (const chunk of provider.callStreaming({
+          messages,
+          maxTokens: 4096,
+          temperature: 0,
+          signal: requestSignal,
+        })) {
           chunkBuffer += chunk;
         }
         return chunkBuffer;
@@ -252,9 +265,37 @@ Output as JSON:
       }
     );
   } catch (error) {
+    if (isTimeoutError(error)) {
+      console.error(`[Variant-${finding.title}] Timed out:`, error);
+      emitWorkflowEvent?.({
+        id: `phase-4-timeout-${Date.now()}-${finding.title}`,
+        timestamp: new Date().toISOString(),
+        phase: 4,
+        phaseName: "Variant Analysis",
+        workflow: "variant-analysis",
+        title: `Variant analysis timed out for ${finding.title}`,
+        detail: "Confirmed original finding with no variant expansion after timeout",
+        status: "warning",
+        progress: 100,
+      });
+      return { confirmed: true, variants: [] };
+    }
     console.error(`[Variant-${finding.title}] Failed after retries:`, error);
+    emitWorkflowEvent?.({
+      id: `phase-4-failed-${Date.now()}-${finding.title}`,
+      timestamp: new Date().toISOString(),
+      phase: 4,
+      phaseName: "Variant Analysis",
+      workflow: "variant-analysis",
+      title: `Variant analysis failed for ${finding.title}`,
+      detail: "Confirmed original finding without variant expansion",
+      status: "warning",
+      progress: 100,
+    });
     // Assume confirmed if we can't analyze variants
     return { confirmed: true, variants: [] };
+  } finally {
+    timeout.clear();
   }
 
   const jsonMatch = fullResponse.match(/```json\n?([\s\S]*?)```/)?.[1]

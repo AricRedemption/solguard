@@ -113,7 +113,8 @@ export async function runAuditPipelineWithDependencies(
       prependPromptSystem(phasePrompts[0], awarenessPrompt),
       (msg) => onEvent({ type: "phase_progress", phase: 1, message: msg }),
       analysisContext,
-      emitWorkflowEvent
+      emitWorkflowEvent,
+      signal
     );
     onEvent({ type: "phase_complete", phase: 1, output: phase1Result });
 
@@ -130,7 +131,8 @@ export async function runAuditPipelineWithDependencies(
       prependPromptSystem(phasePrompts[1], awarenessPrompt),
       (msg) => onEvent({ type: "phase_progress", phase: 2, message: msg }),
       analysisContext,
-      emitWorkflowEvent
+      emitWorkflowEvent,
+      signal
     );
     onEvent({ type: "phase_complete", phase: 2, output: phase2Result });
 
@@ -151,7 +153,8 @@ export async function runAuditPipelineWithDependencies(
       prependPromptSystem(phasePrompts[2], awarenessPrompt),
       (msg) => onEvent({ type: "phase_progress", phase: 3, message: msg }),
       analysisContext,
-      emitWorkflowEvent
+      emitWorkflowEvent,
+      signal
     );
     onEvent({ type: "phase_complete", phase: 3, output: phase3Result });
 
@@ -168,7 +171,8 @@ export async function runAuditPipelineWithDependencies(
       prependPromptSystem(phasePrompts[3], awarenessPrompt),
       (msg) => onEvent({ type: "phase_progress", phase: 4, message: msg }),
       analysisContext,
-      emitWorkflowEvent
+      emitWorkflowEvent,
+      signal
     );
     onEvent({ type: "phase_complete", phase: 4, output: phase4Result });
 
@@ -186,7 +190,8 @@ export async function runAuditPipelineWithDependencies(
       prependPromptSystem(phasePrompts[4], awarenessPrompt),
       (msg) => onEvent({ type: "phase_progress", phase: 5, message: msg }),
       analysisContext,
-      emitWorkflowEvent
+      emitWorkflowEvent,
+      signal
     );
     onEvent({ type: "phase_complete", phase: 5, output: finalResult });
 

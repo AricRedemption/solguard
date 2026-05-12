@@ -28,7 +28,7 @@ export class OpenAIProvider implements LLMProvider {
           content: m.content,
         })),
       ],
-    });
+    }, options.signal ? { signal: options.signal } : undefined);
 
     const message = response.choices[0]?.message;
     return {
@@ -55,7 +55,7 @@ export class OpenAIProvider implements LLMProvider {
           content: m.content,
         })),
       ],
-    });
+    }, options.signal ? { signal: options.signal } : undefined);
 
     for await (const chunk of stream) {
       const text = chunk.choices[0]?.delta?.content;

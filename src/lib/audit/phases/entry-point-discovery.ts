@@ -5,6 +5,7 @@ import type { PhasePrompt } from "../prompts/solana-adapter";
 import { parseJSON, Phase1ResultSchema } from "../result-parser";
 import { withRetry } from "@/lib/llm/provider";
 import { renderPromptContext } from "../context-builder";
+import { createTimeoutSignal, isTimeoutError } from "../timeout";
 
 export interface Phase1Result {
   entryPoints: Array<{
@@ -20,7 +21,8 @@ export async function runPhase1(
   phasePrompt: PhasePrompt,
   onProgress: (msg: string) => void,
   analysisContext?: AnalysisContext,
-  emitWorkflowEvent?: (item: import("@/types/audit").WorkflowEvent) => void
+  emitWorkflowEvent?: (item: import("@/types/audit").WorkflowEvent) => void,
+  signal?: AbortSignal
 ): Promise<Phase1Result> {
   onProgress("Analyzing structured context for entry points...");
   emitWorkflowEvent?.({
@@ -62,13 +64,20 @@ ${contextSummary || "none"}`,
     },
   ];
 
+  const timeout = createTimeoutSignal(45_000, "Entry point discovery timed out after 45 seconds");
+  const requestSignal = signal ? AbortSignal.any([signal, timeout.signal]) : timeout.signal;
   let fullResponse = "";
 
   try {
     fullResponse = await withRetry(
       async () => {
         let chunkBuffer = "";
-        for await (const chunk of provider.callStreaming({ messages, maxTokens: 4096, temperature: 0 })) {
+        for await (const chunk of provider.callStreaming({
+          messages,
+          maxTokens: 4096,
+          temperature: 0,
+          signal: requestSignal,
+        })) {
           chunkBuffer += chunk;
         }
         return chunkBuffer;
@@ -82,9 +91,38 @@ ${contextSummary || "none"}`,
       }
     );
   } catch (error) {
+    if (isTimeoutError(error)) {
+      console.error("[Phase1] Timed out:", error);
+      onProgress("Entry point discovery timed out, returning empty results");
+      emitWorkflowEvent?.({
+        id: `phase-1-timeout-${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        phase: 1,
+        phaseName: "Entry Point Discovery",
+        workflow: "entry-point-discovery",
+        title: "Entry point discovery timed out",
+        detail: "Fallback: no entry points returned",
+        status: "warning",
+        progress: 100,
+      });
+      return { entryPoints: [] };
+    }
     console.error("[Phase1] Failed after retries:", error);
     onProgress("LLM call failed, returning empty results");
+    emitWorkflowEvent?.({
+      id: `phase-1-failed-${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      phase: 1,
+      phaseName: "Entry Point Discovery",
+      workflow: "entry-point-discovery",
+      title: "Entry point discovery failed",
+      detail: "Fallback: no entry points returned",
+      status: "warning",
+      progress: 100,
+    });
     return { entryPoints: [] };
+  } finally {
+    timeout.clear();
   }
 
   onProgress("Parsing entry point analysis...");

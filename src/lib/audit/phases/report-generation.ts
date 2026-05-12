@@ -8,6 +8,7 @@ import { parseJSON, AuditResultSchema } from "../result-parser";
 import { withRetry } from "@/lib/llm/provider";
 import { renderPromptContext } from "../context-builder";
 import { normalizeEvidence } from "../evidence";
+import { createTimeoutSignal, isTimeoutError } from "../timeout";
 
 export async function runPhase5(
   provider: LLMProvider,
@@ -17,7 +18,8 @@ export async function runPhase5(
   phasePrompt: PhasePrompt,
   onProgress: (msg: string) => void,
   analysisContext?: AnalysisContext,
-  emitWorkflowEvent?: (item: WorkflowEvent) => void
+  emitWorkflowEvent?: (item: WorkflowEvent) => void,
+  signal?: AbortSignal
 ): Promise<AuditResult> {
   onProgress("Generating audit report...");
   emitWorkflowEvent?.({
@@ -79,13 +81,20 @@ Scoring guide:
     },
   ];
 
+  const timeout = createTimeoutSignal(45_000, "Report generation timed out after 45 seconds");
+  const requestSignal = signal ? AbortSignal.any([signal, timeout.signal]) : timeout.signal;
   let fullResponse = "";
 
   try {
     fullResponse = await withRetry(
       async () => {
         let chunkBuffer = "";
-        for await (const chunk of provider.callStreaming({ messages, maxTokens: 8192, temperature: 0 })) {
+        for await (const chunk of provider.callStreaming({
+          messages,
+          maxTokens: 8192,
+          temperature: 0,
+          signal: requestSignal,
+        })) {
           chunkBuffer += chunk;
         }
         return chunkBuffer;
@@ -99,9 +108,38 @@ Scoring guide:
       }
     );
   } catch (error) {
+    if (isTimeoutError(error)) {
+      console.error("[Phase5] Timed out:", error);
+      onProgress("Report generation timed out, building fallback report");
+      emitWorkflowEvent?.({
+        id: `phase-5-timeout-${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        phase: 5,
+        phaseName: "Report Generation",
+        workflow: "report-generation",
+        title: "Report generation timed out",
+        detail: "Fallback report built from validated findings",
+        status: "warning",
+        progress: 100,
+      });
+      return buildFallbackResult(programAddress, allFindings);
+    }
     console.error("[Phase5] Failed after retries:", error);
     onProgress("LLM call failed, building fallback report");
+    emitWorkflowEvent?.({
+      id: `phase-5-failed-${Date.now()}`,
+      timestamp: new Date().toISOString(),
+      phase: 5,
+      phaseName: "Report Generation",
+      workflow: "report-generation",
+      title: "Report generation failed",
+      detail: "Fallback report built from validated findings",
+      status: "warning",
+      progress: 100,
+    });
     return buildFallbackResult(programAddress, allFindings);
+  } finally {
+    timeout.clear();
   }
 
   onProgress("Parsing audit report...");

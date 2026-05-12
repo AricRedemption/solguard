@@ -71,7 +71,11 @@ export async function withRetry<T>(
       }
 
       // Don't retry on abort errors
-      if (lastError.name === "AbortError" || lastError.name === "Cancel") {
+      if (
+        lastError.name === "AbortError" ||
+        lastError.name === "Cancel" ||
+        lastError.name === "TimeoutError"
+      ) {
         throw lastError;
       }
 
